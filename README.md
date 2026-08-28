@@ -45,24 +45,45 @@ An AI-powered email threat analysis tool that inspects `.eml` files for phishing
 ### Prerequisites
 
 - Python 3.10+
-- pip
+- Node.js 18+
+- pip & npm
 
-### Setup
+### 1. Backend (API server)
 
 ```bash
-# Clone the repo
-git clone https://github.com/thukpatsawo-bytashi/AI-Email-Threat-Detector.git
-cd AI-Email-Threat-Detector
-
-# Install backend dependencies
+# From the project root
 pip install -r backend/requirements.txt
 
-# Start the API server
+# Start the API (Terminal 1)
 cd backend
 uvicorn main:app --reload --port 8000
 ```
 
-The server starts at **http://localhost:8000**. Interactive docs are available at [http://localhost:8000/docs](http://localhost:8000/docs).
+> The API server starts at `http://localhost:8000`.
+> Interactive API docs are at [http://localhost:8000/docs](http://localhost:8000/docs).
+> **This only serves JSON** — it is not the website.
+
+### 2. Frontend (React website)
+
+Open a **second terminal**:
+
+```bash
+# From the project root
+cd frontend
+npm install
+npm run dev
+```
+
+> The website starts at `http://localhost:5173`.
+> **Open this URL in your browser** to use the app.
+
+### What runs where
+
+| URL | What |
+|-----|------|
+| `http://localhost:8000` | Backend API — returns JSON only |
+| `http://localhost:8000/docs` | Swagger interactive API docs |
+| **`http://localhost:5173`** | **Website — the Upload & Dashboard UI** |
 
 ---
 
