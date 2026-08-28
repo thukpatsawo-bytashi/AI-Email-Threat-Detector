@@ -16,6 +16,7 @@ import urllib.request
 import urllib.error
 import email.utils
 from datetime import datetime
+from functools import lru_cache
 
 # Fallback lookup table for demo consistency
 DEMO_WHOIS_FALLBACK = {
@@ -65,6 +66,7 @@ def extract_email_address(raw_header: str) -> tuple[str, str, str]:
     return (display_name, addr, domain)
 
 
+@lru_cache(maxsize=256)
 def get_domain_age_days(domain: str) -> int | None:
     """
     Attempts to find the age of a domain in days.
@@ -120,9 +122,12 @@ def detect_domain_lookalike(domain: str, display_name: str) -> tuple[bool, str |
     # Heuristic 2: Digit-for-letter substitution in base domain (paypa1, g00gle, micros0ft)
     if re.search(r"[a-z]+[0-9]+[a-z]*|[a-z]*[0-9]+[a-z]+", base_domain):
         # Check if substituting numbers with letters resembles a targeted brand
-        normalized = base_domain.replace("0", "o").replace("1", "l").replace("1", "i").replace("3", "e").replace("5", "s").replace("8", "b")
+        variants = {
+            base_domain.translate(str.maketrans({"0": "o", "1": "l", "3": "e", "4": "a", "5": "s", "7": "t", "8": "b"})),
+            base_domain.translate(str.maketrans({"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "8": "b"})),
+        }
         for brand in TARGETED_BRANDS:
-            if brand in normalized or brand == normalized:
+            if any(brand in variant or brand == variant for variant in variants):
                 return (True, f"Typosquatting/homoglyph detected mimicking '{brand}' ({domain})")
         return (True, f"Suspicious alphanumeric substitution in domain name ({domain})")
 
@@ -142,6 +147,17 @@ def detect_domain_lookalike(domain: str, display_name: str) -> tuple[bool, str |
     return (False, None)
 
 
+def header_value(raw_headers: dict, header_name: str) -> str:
+    """
+    Fetch a header value case-insensitively from parser-normalized headers.
+    """
+    header_name = header_name.lower()
+    for key, value in raw_headers.items():
+        if key.lower() == header_name:
+            return str(value)
+    return ""
+
+
 def parse_authentication_results(raw_headers: dict) -> tuple[str, str, str]:
     """
     Extracts SPF, DKIM, and DMARC status from Authentication-Results,
@@ -152,8 +168,8 @@ def parse_authentication_results(raw_headers: dict) -> tuple[str, str, str]:
     dmarc = "none"
 
     # 1. Inspect Authentication-Results header
-    auth_results = raw_headers.get("Authentication-Results", "")
-    arc_results = raw_headers.get("ARC-Authentication-Results", "")
+    auth_results = header_value(raw_headers, "Authentication-Results")
+    arc_results = header_value(raw_headers, "ARC-Authentication-Results")
     all_auth = f"{auth_results} {arc_results}"
 
     if all_auth.strip():
@@ -170,16 +186,11 @@ def parse_authentication_results(raw_headers: dict) -> tuple[str, str, str]:
 
     # 2. Check Received-SPF header if SPF still none or missing
     if spf == "none":
-        received_spf = raw_headers.get("Received-SPF", "")
+        received_spf = header_value(raw_headers, "Received-SPF")
         if received_spf:
             r_match = re.search(r"^(pass|fail|softfail|neutral|none)", received_spf.strip(), re.IGNORECASE)
             if r_match:
                 spf = r_match.group(1).lower()
-
-    # 3. Check DKIM-Signature presence if DKIM status not in Authentication-Results
-    if dkim == "none" and "DKIM-Signature" in raw_headers:
-        # Signature header exists, default to pass if no explicit failure reported
-        dkim = "pass"
 
     return (spf, dkim, dmarc)
 

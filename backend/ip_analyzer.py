@@ -11,9 +11,12 @@ import re
 from typing import Any
 import urllib.request
 import json
+from functools import lru_cache
 
-# IPv4 regex pattern
-IPV4_PATTERN = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+# Broad candidate matcher; ipaddress performs final IPv4/IPv6 validation.
+IP_CANDIDATE_PATTERN = re.compile(
+    r"(?<![\w.:-])(?:\d{1,3}(?:\.\d{1,3}){3}|[0-9A-Fa-f]{0,4}:[0-9A-Fa-f:.]{2,})(?![\w.:-])"
+)
 
 # Fallback geolocation data for demo safety & test stability
 GEO_FALLBACKS = {
@@ -57,8 +60,15 @@ def is_public_ip(ip_str: str) -> bool:
     Checks if an IP string is a valid, routable public IP.
     Filters private, loopback, link-local, multicast, and reserved ranges.
     """
+    return normalize_public_ip(ip_str) is not None
+
+
+def normalize_public_ip(ip_str: str) -> str | None:
+    """
+    Return the normalized form of a public IPv4/IPv6 address, or None.
+    """
     try:
-        ip_obj = ipaddress.ip_address(ip_str)
+        ip_obj = ipaddress.ip_address(str(ip_str).strip("[]()<>.,;"))
         if (
             ip_obj.is_private
             or ip_obj.is_loopback
@@ -67,15 +77,15 @@ def is_public_ip(ip_str: str) -> bool:
             or ip_obj.is_multicast
             or ip_obj.is_unspecified
         ):
-            return False
-        return True
+            return None
+        return str(ip_obj)
     except ValueError:
-        return False
+        return None
 
 
 def extract_public_ips(received_chain: list[str]) -> list[str]:
     """
-    Extracts all unique public IPv4 addresses across the Received headers.
+    Extracts all unique public IPv4/IPv6 addresses across the Received headers.
     Headers are inspected in reverse chronological order (originating hop first).
     """
     if not received_chain:
@@ -84,14 +94,15 @@ def extract_public_ips(received_chain: list[str]) -> list[str]:
     extracted = []
     # Received headers are prepended by each hop; the bottom header is closest to the sender
     for header in reversed(received_chain):
-        matches = IPV4_PATTERN.findall(header)
-        for ip in matches:
-            if is_public_ip(ip) and ip not in extracted:
+        for candidate in IP_CANDIDATE_PATTERN.findall(header):
+            ip = normalize_public_ip(candidate)
+            if ip and ip not in extracted:
                 extracted.append(ip)
 
     return extracted
 
 
+@lru_cache(maxsize=512)
 def lookup_geo(ip: str) -> dict[str, str]:
     """
     Performs IP geolocation lookup using ip-api.com with timeout.
@@ -102,7 +113,7 @@ def lookup_geo(ip: str) -> dict[str, str]:
         {
             "country": "Unknown",
             "city": "Unknown",
-            "isp": "Unknown Hosting / Network",
+            "isp": "Unknown Network",
         }
     )
 

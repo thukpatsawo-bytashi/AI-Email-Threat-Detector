@@ -32,11 +32,11 @@ An AI-powered email threat analysis tool that inspects `.eml` files for phishing
 |------|--------|-------|--------|
 | 1 | `email_parser.py` | Raw `.eml` bytes | `ParsedEmail` dict |
 | 2 | `header_analyzer.py` | `ParsedEmail` | `HeaderAnalysisResult` |
-| 3 | `phishing_model.py` | Email body text | `NLPResult` |
+| 3 | `phishing_model.py` | Email subject + body text | `NLPResult` |
 | 4 | `ip_analyzer.py` | Received chain | `IPResult` |
 | 5 | `risk_engine.py` | Steps 2–4 results | `FinalResult` |
 
-> **Note:** The backend is currently running in **stub mode** — all five analysis stages return hardcoded mock data. Real module imports will be wired in at integration time.
+> **Note:** The backend runs the live analysis pipeline: parser, header checks, NLP classification, IP intelligence, and final risk scoring.
 
 ---
 
@@ -162,7 +162,7 @@ The API allows cross-origin requests from:
 ```
 AI-Email-Threat-Detector/
 ├── backend/
-│   ├── main.py               # FastAPI app & route (stub mode)
+│   ├── main.py               # FastAPI app & live analysis route
 │   ├── email_parser.py        # .eml parsing
 │   ├── header_analyzer.py     # SPF / DKIM / DMARC analysis
 │   ├── phishing_model.py      # NLP phishing classification
@@ -179,7 +179,7 @@ AI-Email-Threat-Detector/
 
 | Module | Owner | Status |
 |--------|-------|--------|
-| `main.py` | API / Integration | ✅ Stub mode ready |
+| `main.py` | API / Integration | ✅ Live pipeline wired |
 | `email_parser.py` | Parser team | 🔧 In progress |
 | `header_analyzer.py` | Header team | 🔧 In progress |
 | `phishing_model.py` | NLP team | 🔧 In progress |

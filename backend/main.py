@@ -74,7 +74,10 @@ async def analyze_email(file: UploadFile = File(...)):
         header_res = analyze_headers(parsed)
 
         # Stage 3: NLP Content Phishing Classification
-        nlp_res = classify_nlp(parsed.get("body", ""))
+        nlp_input = "\n\n".join(
+            part for part in (parsed.get("subject", ""), parsed.get("body", "")) if part
+        )
+        nlp_res = classify_nlp(nlp_input)
 
         # Stage 4: IP Geolocation & Network Reputation
         ip_res = analyze_ip(parsed.get("received_chain", []))
