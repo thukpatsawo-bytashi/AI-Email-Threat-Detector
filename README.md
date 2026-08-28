@@ -133,10 +133,25 @@ curl -X POST http://localhost:8000/api/analyze \
   "legitimate_probability": 3,
   "flagged_terms": ["urgent", "account suspended", "click immediately"],
 
-  "risk_score": 89,
+  "risk_score": 100,
   "classification": "CRITICAL",
+  "evidence_level": "STRONG",
   "reasons": ["SPF failed", "DKIM failed", "Sender/Reply-To mismatch", "High phishing probability (91%)"],
-  "breakdown": { "nlp": 91, "header": 80, "ip": 60 }
+  "breakdown": { "nlp": 91, "header": 80, "ip": 60 },
+  "risk_metrics": {
+    "content": 43,
+    "authentication": 40,
+    "identity": 14,
+    "domain": 0,
+    "network": 12,
+    "synergy": 17,
+    "evidence_sources": ["content", "authentication", "identity", "network"],
+    "auth_passes": 0,
+    "auth_failures": 3,
+    "auth_missing": 0,
+    "flagged_term_count": 3,
+    "analysis_confidence": 100
+  }
 }
 ```
 

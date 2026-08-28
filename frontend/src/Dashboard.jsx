@@ -74,12 +74,20 @@ function ReasonsCard({ reasons }) {
   )
 }
 
-function BreakdownCard({ breakdown }) {
+function BreakdownCard({ breakdown, riskMetrics, evidenceLevel }) {
   const bars = [
     { key: 'nlp', label: 'NLP / Content Analysis', cls: 'nlp' },
     { key: 'header', label: 'Header Authentication', cls: 'header' },
     { key: 'ip', label: 'IP Reputation', cls: 'ip' },
   ]
+  const metricBars = riskMetrics ? [
+    { key: 'content', label: 'Content Evidence', cls: 'nlp' },
+    { key: 'authentication', label: 'Authentication Proof', cls: 'header' },
+    { key: 'identity', label: 'Sender Identity', cls: 'header' },
+    { key: 'domain', label: 'Domain Signals', cls: 'ip' },
+    { key: 'network', label: 'Network Reputation', cls: 'ip' },
+  ] : []
+
   return (
     <div className="glass-card">
       <h2 className="section-title">Risk Breakdown</h2>
@@ -101,6 +109,44 @@ function BreakdownCard({ breakdown }) {
           </div>
         ))}
       </div>
+
+      {riskMetrics && (
+        <div className="evidence-panel">
+          <div className="evidence-summary">
+            <span>Evidence Level</span>
+            <strong>{evidenceLevel}</strong>
+          </div>
+          <div className="evidence-summary">
+            <span>Analysis Confidence</span>
+            <strong>{riskMetrics.analysis_confidence}%</strong>
+          </div>
+          <div className="evidence-tags">
+            {(riskMetrics.evidence_sources?.length ? riskMetrics.evidence_sources : ['no strong evidence']).map((source) => (
+              <span key={source} className="evidence-tag">
+                {source}
+              </span>
+            ))}
+          </div>
+          <div className="breakdown-bars compact-bars">
+            {metricBars.map(({ key, label, cls }) => (
+              <div className="bar-row" key={key}>
+                <div className="bar-label">
+                  <span className="bar-label-name">{label}</span>
+                  <span className="bar-label-value" style={{ color: `var(--bar-${cls})` }}>
+                    {riskMetrics[key] ?? 0}
+                  </span>
+                </div>
+                <div className="bar-track">
+                  <div
+                    className={`bar-fill ${cls}`}
+                    style={{ width: `${Math.min(100, riskMetrics[key] ?? 0)}%` }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -183,6 +229,8 @@ export default function Dashboard({ result, onReset }) {
     classification = 'MEDIUM',
     reasons = [],
     breakdown = { nlp: 0, header: 0, ip: 0 },
+    risk_metrics = null,
+    evidence_level = 'LOW',
     from: senderFrom = '',
     subject = '',
     body = '',
@@ -201,7 +249,11 @@ export default function Dashboard({ result, onReset }) {
 
         <div className="dashboard-cols">
           <ReasonsCard reasons={reasons} />
-          <BreakdownCard breakdown={breakdown} />
+          <BreakdownCard
+            breakdown={breakdown}
+            riskMetrics={risk_metrics}
+            evidenceLevel={evidence_level}
+          />
         </div>
 
         <div className="dashboard-cols">

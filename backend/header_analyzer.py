@@ -244,20 +244,14 @@ def analyze(parsed_email: dict) -> dict:
     if spf in ("fail", "softfail"):
         anomalies.append(f"SPF authentication failed ({spf})")
         header_risk_score += 20
-    elif spf == "none":
-        header_risk_score += 5
 
     if dkim == "fail":
         anomalies.append("DKIM cryptographic signature verification failed")
         header_risk_score += 20
-    elif dkim == "none":
-        header_risk_score += 5
 
     if dmarc in ("fail", "softfail"):
         anomalies.append("DMARC policy check failed")
         header_risk_score += 20
-    elif dmarc == "none":
-        header_risk_score += 5
 
     # Cap score at 100
     header_risk_score = max(0, min(100, header_risk_score))

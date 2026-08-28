@@ -505,6 +505,52 @@ body {
 .bar-fill.header { background: var(--bar-header); }
 .bar-fill.ip   { background: var(--bar-ip); }
 
+.evidence-panel {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border-glass);
+}
+
+.evidence-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.evidence-summary strong {
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  letter-spacing: 0;
+}
+
+.evidence-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0 16px;
+}
+
+.evidence-tag {
+  padding: 3px 8px;
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.compact-bars {
+  gap: 12px;
+}
+
+.compact-bars .bar-track {
+  height: 6px;
+}
+
 /* Sender info */
 .sender-info {
   display: flex;

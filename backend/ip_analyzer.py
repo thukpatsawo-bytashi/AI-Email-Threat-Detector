@@ -153,18 +153,21 @@ def calculate_ip_risk(geo: dict[str, str], ip: str) -> int:
 
     isp_lower = str(geo.get("isp", "")).lower()
 
+    if not isp_lower or isp_lower in ("unknown", "unknown network"):
+        return 0
+
     # 1. Trusted legitimate email providers / residential ISPs
     for trusted in TRUSTED_MAIL_ISPS:
         if trusted in isp_lower:
-            return 10
+            return 5
 
     # 2. Known VPN, Tor, Bulletproof, or Cloud Hosting senders
     for risky in HIGH_RISK_ISP_KEYWORDS:
         if risky in isp_lower:
             return 60
 
-    # 3. Default baseline score
-    return 25
+    # 3. Public IP with no specific reputation evidence.
+    return 10
 
 
 def analyze(received_chain: list[str]) -> dict[str, Any]:
