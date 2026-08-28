@@ -1,1 +1,27 @@
-dummy
+From: "Billing Department" <billing@company-payments.xyz>
+To: victim@example.com
+Subject: URGENT: Outstanding Invoice #INV-92841
+Reply-To: payments.help@gmail.com
+Return-Path: <bounce@evil.xyz>
+Message-ID: <20260828.92841@evil.xyz>
+Date: Fri, 28 Aug 2026 12:00:00 +0000
+Authentication-Results: mx.google.com;
+ spf=fail (google.com: domain of billing@company-payments.xyz does not designate 185.123.45.67 as permitted sender) smtp.mailfrom=billing@company-payments.xyz;
+ dkim=fail header.i=@company-payments.xyz;
+ dmarc=fail (p=REJECT sp=REJECT dis=NONE) header.from=company-payments.xyz
+Received: from mail.evil.xyz ([185.123.45.67]) by mx.google.com with ESMTPS for <victim@example.com>; Fri, 28 Aug 2026 12:00:01 +0000
+Received: from billing-bot ([185.123.45.67]) by mail.evil.xyz with ESMTP; Fri, 28 Aug 2026 11:59:59 +0000
+Content-Type: text/plain; charset="utf-8"
+
+Dear Valued Customer,
+
+Your account will be suspended within 24 hours due to an outstanding invoice of $4,850.00.
+We noticed unauthorized access and payment declined errors on your recent transaction.
+
+Please verify your account and confirm your details immediately by clicking the link below:
+https://company-payments.xyz/verify-billing
+
+Failure to act now will result in permanent termination of your services.
+
+Regards,
+Billing & Security Operations

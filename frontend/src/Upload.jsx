@@ -86,17 +86,25 @@ export default function Upload({ onResult }) {
     setLoading(true)
     setError(null)
     try {
-      // ── STUB: swap for real fetch at integration ────────────
-      // const formData = new FormData()
-      // formData.append('file', file)
-      // const res = await fetch('/api/analyze', { method: 'POST', body: formData })
-      // const data = await res.json()
-      // if (!res.ok) throw new Error(data.detail || res.statusText)
+      const formData = new FormData()
+      formData.append('file', file)
 
-      const data = await mockAnalyze(file)
+      let res
+      try {
+        res = await fetch('/api/analyze', { method: 'POST', body: formData })
+      } catch (_netErr) {
+        // Fallback to direct localhost URL if Vite proxy is bypassed
+        res = await fetch('http://localhost:8000/api/analyze', { method: 'POST', body: formData })
+      }
+
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.detail || `Server returned error status ${res.status}`)
+      }
+
       onResult(data)
     } catch (err) {
-      setError(err.message || 'Analysis failed. Please try again.')
+      setError(err.message || 'Analysis failed. Please check that the backend server is running.')
     } finally {
       setLoading(false)
     }
