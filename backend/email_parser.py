@@ -102,11 +102,20 @@ def extract_body(email_message) -> str:
 def extract_raw_headers(email_message) -> dict[str, str]:
     """
     Convert all email headers into a dictionary of string values.
+    Duplicate headers are concatenated because authentication systems often add
+    more than one Authentication-Results or Received-SPF line.
     """
     headers = {}
+    canonical_keys = {}
     for key, value in email_message.items():
-        # Clean multiline folded headers
-        headers[key] = re.sub(r"\s+", " ", str(value)).strip()
+        clean_value = re.sub(r"\s+", " ", str(value)).strip()
+        lower_key = key.lower()
+        existing_key = canonical_keys.get(lower_key)
+        if existing_key:
+            headers[existing_key] = f"{headers[existing_key]} {clean_value}".strip()
+        else:
+            headers[key] = clean_value
+            canonical_keys[lower_key] = key
     return headers
 
 

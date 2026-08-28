@@ -1,49 +1,5 @@
 import React, { useState, useRef } from 'react'
 
-/* ──────────────────────────────────────────────────────────────
-   MOCK RESPONSE — swap for real fetch at integration time
-   ────────────────────────────────────────────────────────────── */
-const MOCK_RESULT = {
-  from: "billing@company-payments.xyz",
-  subject: "URGENT: Outstanding Invoice",
-  body: "Your account will be suspended...",
-  received_chain: ["Received: from suspicious-server...", "Received: by another-mail-server..."],
-  spf: "fail",
-  dkim: "fail",
-  dmarc: "fail",
-  sender_reply_mismatch: true,
-  domain_lookalike: false,
-  domain_age_days: null,
-  anomalies: ["Sender identity mismatch", "Multiple authentication failures"],
-  header_risk_score: 80,
-  extracted_ips: ["185.123.45.67"],
-  primary_ip: "185.123.45.67",
-  geo: { country: "Germany", city: "Frankfurt", isp: "Example Hosting Provider" },
-  ip_risk_score: 60,
-  phishing_probability: 91,
-  legitimate_probability: 3,
-  flagged_terms: ["urgent", "account suspended", "click immediately"],
-  method: "heuristic",
-  risk_score: 89,
-  classification: "CRITICAL",
-  reasons: [
-    "SPF failed",
-    "DKIM failed",
-    "Sender/Reply-To mismatch",
-    "High phishing probability (91%)",
-  ],
-  breakdown: { nlp: 91, header: 80, ip: 60 },
-}
-
-async function mockAnalyze(_file) {
-  // Simulate network latency
-  await new Promise((r) => setTimeout(r, 1200))
-  return MOCK_RESULT
-}
-
-/* ──────────────────────────────────────────────────────────────
-   Upload Component
-   ────────────────────────────────────────────────────────────── */
 export default function Upload({ onResult }) {
   const [file, setFile] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -86,17 +42,25 @@ export default function Upload({ onResult }) {
     setLoading(true)
     setError(null)
     try {
-      // ── STUB: swap for real fetch at integration ────────────
-      // const formData = new FormData()
-      // formData.append('file', file)
-      // const res = await fetch('/api/analyze', { method: 'POST', body: formData })
-      // const data = await res.json()
-      // if (!res.ok) throw new Error(data.detail || res.statusText)
+      const formData = new FormData()
+      formData.append('file', file)
 
-      const data = await mockAnalyze(file)
+      let res
+      try {
+        res = await fetch('/api/analyze', { method: 'POST', body: formData })
+      } catch (_netErr) {
+        // Fallback to direct localhost URL if Vite proxy is bypassed
+        res = await fetch('http://localhost:8000/api/analyze', { method: 'POST', body: formData })
+      }
+
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.detail || `Server returned error status ${res.status}`)
+      }
+
       onResult(data)
     } catch (err) {
-      setError(err.message || 'Analysis failed. Please try again.')
+      setError(err.message || 'Analysis failed. Please check that the backend server is running.')
     } finally {
       setLoading(false)
     }
