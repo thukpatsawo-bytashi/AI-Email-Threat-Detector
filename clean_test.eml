@@ -1,0 +1,27 @@
+From: "Sarah Jenkins" <sarah.jenkins@google.com>
+To: alex@example.com
+Subject: Project Roadmap & Architecture Sync Next Week
+Reply-To: sarah.jenkins@google.com
+Return-Path: <sarah.jenkins@google.com>
+Message-ID: <CABc123xyz@mail.google.com>
+Date: Fri, 28 Aug 2026 14:30:00 +0000
+Authentication-Results: mx.google.com;
+ spf=pass (google.com: domain of sarah.jenkins@google.com designates 209.85.220.65 as permitted sender) smtp.mailfrom=sarah.jenkins@google.com;
+ dkim=pass header.i=@google.com;
+ dmarc=pass (p=REJECT) header.from=google.com
+Received: from mail-sor-f65.google.com ([209.85.220.65]) by mx.example.com with ESMTPS; Fri, 28 Aug 2026 14:30:01 +0000
+Content-Type: text/plain; charset="utf-8"
+
+Hi Alex,
+
+Hope you're having a productive week!
+
+I wanted to touch base regarding the architecture diagram for the upcoming sprint.
+The design team shared the updated mockups and everything looks aligned with our roadmap goals.
+
+Let's schedule a 30-minute sync next Tuesday at 2 PM to review the deliverables before the all-hands.
+
+Best regards,
+Sarah Jenkins
+Staff Software Engineer
+Google Cloud
