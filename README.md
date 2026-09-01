@@ -232,22 +232,6 @@ AI-Email-Threat-Detector/
 │   ├── requirements.txt       # Python dependencies
 │   └── PARSER_README.md       # Email parser docs
 └── frontend/                  # React UI (TBD)
-```
-
----
-
-## Module Ownership
-
-| Module | Owner | Status |
-|--------|-------|--------|
-| `main.py` | API / Integration | ✅ Live pipeline wired |
-| `email_parser.py` | Parser team | 🔧 In progress |
-| `header_analyzer.py` | Header team | 🔧 In progress |
-| `phishing_model.py` | NLP team | 🔧 In progress |
-| `url_analyzer.py` | URL team | ✅ Live pipeline wired |
-| `ip_analyzer.py` | IP team | 🔧 In progress |
-| `risk_engine.py` | Risk team | ✅ Evidence-aware scoring wired |
-| `frontend/` | Frontend team | 🔧 In progress |
 
 ---
 
