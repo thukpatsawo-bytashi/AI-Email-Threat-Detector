@@ -80,12 +80,17 @@ function BreakdownCard({ breakdown, riskMetrics, evidenceLevel }) {
     { key: 'header', label: 'Header Authentication', cls: 'header' },
     { key: 'ip', label: 'IP Reputation', cls: 'ip' },
   ]
+  if (typeof breakdown.url === 'number') {
+    bars.push({ key: 'url', label: 'URL Analysis', cls: 'url' })
+  }
+
   const metricBars = riskMetrics ? [
     { key: 'content', label: 'Content Evidence', cls: 'nlp' },
     { key: 'authentication', label: 'Authentication Proof', cls: 'header' },
     { key: 'identity', label: 'Sender Identity', cls: 'header' },
     { key: 'domain', label: 'Domain Signals', cls: 'ip' },
     { key: 'network', label: 'Network Reputation', cls: 'ip' },
+    { key: 'url', label: 'URL Evidence', cls: 'url' },
   ] : []
 
   return (

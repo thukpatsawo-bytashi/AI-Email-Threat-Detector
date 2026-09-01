@@ -41,6 +41,7 @@
   --bar-nlp: #8b5cf6;
   --bar-header: #3b82f6;
   --bar-ip: #06b6d4;
+  --bar-url: #f59e0b;
 
   /* Sizing */
   --radius-sm: 8px;
@@ -504,6 +505,7 @@ body {
 .bar-fill.nlp  { background: var(--bar-nlp); }
 .bar-fill.header { background: var(--bar-header); }
 .bar-fill.ip   { background: var(--bar-ip); }
+.bar-fill.url   { background: var(--bar-url); }
 
 .evidence-panel {
   margin-top: 22px;

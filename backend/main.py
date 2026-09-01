@@ -13,6 +13,7 @@ import traceback
 from email_parser import parse_email
 from header_analyzer import analyze as analyze_headers
 from phishing_model import classify as classify_nlp
+from url_analyzer import analyze_urls
 from ip_analyzer import analyze as analyze_ip
 from risk_engine import compute as compute_risk
 
@@ -79,11 +80,14 @@ async def analyze_email(file: UploadFile = File(...)):
         )
         nlp_res = classify_nlp(nlp_input)
 
-        # Stage 4: IP Geolocation & Network Reputation
+        # Stage 4: URL Phishing Analysis
+        url_res = analyze_urls(parsed)
+
+        # Stage 5: IP Geolocation & Network Reputation
         ip_res = analyze_ip(parsed.get("received_chain", []))
 
-        # Stage 5: Composite Risk Calculation
-        final_verdict = compute_risk(header_res, nlp_res, ip_res)
+        # Stage 6: Composite Risk Calculation
+        final_verdict = compute_risk(header_res, nlp_res, ip_res, url_res)
 
         # ── Flatten response into unified JSON ─────────────────────────
         return {
@@ -102,6 +106,9 @@ async def analyze_email(file: UploadFile = File(...)):
 
             # NLP model results
             **nlp_res,
+
+            # URL analysis results
+            **url_res,
 
             # Risk Engine final verdict
             **final_verdict,
