@@ -1,6 +1,6 @@
 # 🛡️ AI Email Threat Detector
 
-An AI-powered email threat analysis tool that inspects `.eml` files for phishing indicators, suspicious headers, and malicious IPs — built as a hackathon MVP.
+An AI-powered email threat analysis tool that inspects `.eml` files for phishing indicators, suspicious headers, URLs, and sender infrastructure — built as a hackathon MVP.
 
 ## Architecture
 
@@ -33,10 +33,11 @@ An AI-powered email threat analysis tool that inspects `.eml` files for phishing
 | 1 | `email_parser.py` | Raw `.eml` bytes | `ParsedEmail` dict |
 | 2 | `header_analyzer.py` | `ParsedEmail` | `HeaderAnalysisResult` |
 | 3 | `phishing_model.py` | Email subject + body text | `NLPResult` |
-| 4 | `ip_analyzer.py` | Received chain | `IPResult` |
-| 5 | `risk_engine.py` | Steps 2–4 results | `FinalResult` |
+| 4 | `url_analyzer.py` | Parsed email body / HTML URLs | `URLAnalysisResult` |
+| 5 | `ip_analyzer.py` | Received chain | `IPResult` |
+| 6 | `risk_engine.py` | Steps 2–5 results | `FinalResult` |
 
-> **Note:** The backend runs the live analysis pipeline: parser, header checks, NLP classification, IP intelligence, and final risk scoring.
+> **Note:** The backend runs the live analysis pipeline: parser, header checks, NLP classification, URL analysis, IP intelligence, and evidence-aware final risk scoring.
 
 ---
 
@@ -112,44 +113,88 @@ curl -X POST http://localhost:8000/api/analyze \
 
 ```json
 {
-  "from": "billing@company-payments.xyz",
-  "subject": "URGENT: Outstanding Invoice",
-  "body": "Your account will be suspended...",
+  "from": "Billing Department <billing@company-payments.xyz>",
+  "subject": "URGENT: Outstanding Invoice #INV-92841",
+  "body": "Dear Valued Customer...",
 
   "spf": "fail",
   "dkim": "fail",
   "dmarc": "fail",
   "sender_reply_mismatch": true,
-  "domain_lookalike": false,
-  "anomalies": ["Sender identity mismatch", "Multiple authentication failures"],
-  "header_risk_score": 80,
+  "domain_lookalike": true,
+  "domain_age_days": 3,
+  "anomalies": [
+    "Sender identity mismatch: From (company-payments.xyz) vs Reply-To (gmail.com)",
+    "Envelope sender mismatch: From (company-payments.xyz) vs Return-Path (evil.xyz)",
+    "Suspicious high-risk top-level domain (.xyz)",
+    "Newly registered domain (only 3 days old)",
+    "SPF authentication failed (fail)",
+    "DKIM cryptographic signature verification failed",
+    "DMARC policy check failed"
+  ],
+  "header_risk_score": 100,
 
   "extracted_ips": ["185.123.45.67"],
   "primary_ip": "185.123.45.67",
   "geo": { "country": "Germany", "city": "Frankfurt", "isp": "Example Hosting Provider" },
   "ip_risk_score": 60,
 
-  "phishing_probability": 91,
-  "legitimate_probability": 3,
-  "flagged_terms": ["urgent", "account suspended", "click immediately"],
+  "phishing_probability": 79,
+  "legitimate_probability": 21,
+  "flagged_terms": [
+    "urgent",
+    "immediately",
+    "within 24 hours",
+    "unauthorized access",
+    "verify your account",
+    "confirm your details",
+    "outstanding invoice",
+    "payment declined"
+  ],
+
+  "url_count": 1,
+  "suspicious_url_count": 0,
+  "malicious_url_count": 0,
+  "url_risk_score": 8,
+  "urls": [
+    {
+      "original_url": "https://company-payments.xyz/verify-billing",
+      "hostname": "company-payments.xyz",
+      "registrable_domain": "company-payments.xyz",
+      "risk_score": 8,
+      "classification": "SAFE"
+    }
+  ],
+  "url_evidence": [],
 
   "risk_score": 100,
   "classification": "CRITICAL",
   "evidence_level": "STRONG",
-  "reasons": ["SPF failed", "DKIM failed", "Sender/Reply-To mismatch", "High phishing probability (91%)"],
-  "breakdown": { "nlp": 91, "header": 80, "ip": 60 },
+  "reasons": [
+    "Sender identity mismatch: From (company-payments.xyz) vs Reply-To (gmail.com)",
+    "Envelope sender mismatch: From (company-payments.xyz) vs Return-Path (evil.xyz)",
+    "Suspicious high-risk top-level domain (.xyz)",
+    "Newly registered domain (only 3 days old)",
+    "SPF authentication failed (fail)",
+    "DKIM cryptographic signature verification failed",
+    "DMARC policy check failed",
+    "Strong phishing-language evidence (79%): urgent, immediately, within 24 hours, unauthorized access",
+    "Risky sending network (185.123.45.67) associated with Example Hosting Provider"
+  ],
+  "breakdown": { "nlp": 79, "header": 100, "ip": 60, "url": 8 },
   "risk_metrics": {
-    "content": 43,
+    "content": 38,
     "authentication": 40,
-    "identity": 14,
-    "domain": 0,
+    "identity": 22,
+    "domain": 28,
     "network": 12,
-    "synergy": 17,
-    "evidence_sources": ["content", "authentication", "identity", "network"],
+    "url": 0,
+    "synergy": 25,
+    "evidence_sources": ["content", "authentication", "identity", "domain", "network"],
     "auth_passes": 0,
     "auth_failures": 3,
     "auth_missing": 0,
-    "flagged_term_count": 3,
+    "flagged_term_count": 8,
     "analysis_confidence": 100
   }
 }
@@ -181,8 +226,9 @@ AI-Email-Threat-Detector/
 │   ├── email_parser.py        # .eml parsing
 │   ├── header_analyzer.py     # SPF / DKIM / DMARC analysis
 │   ├── phishing_model.py      # NLP phishing classification
+│   ├── url_analyzer.py        # URL extraction and phishing signal analysis
 │   ├── ip_analyzer.py         # IP geolocation & risk scoring
-│   ├── risk_engine.py         # Final risk aggregation
+│   ├── risk_engine.py         # Evidence-aware final risk aggregation
 │   ├── requirements.txt       # Python dependencies
 │   └── PARSER_README.md       # Email parser docs
 └── frontend/                  # React UI (TBD)
