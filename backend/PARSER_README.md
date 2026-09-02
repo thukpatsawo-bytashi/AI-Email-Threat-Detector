@@ -6,7 +6,7 @@ standardized Python dictionary for use by the other threat detection modules.
 ## Usage
 
 ```python
-from email_parser import parse_email
+from analyzers import parse_email
 
 with open("email.eml", "rb") as f:
     file_data = f.read()

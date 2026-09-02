@@ -14,7 +14,10 @@ from sqlalchemy import Enum as SQLEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
 
-from db import Base
+try:
+    from .db import Base
+except ImportError:
+    from database.db import Base
 
 
 class IncidentStatus(str, Enum):

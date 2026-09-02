@@ -30,12 +30,12 @@ An AI-powered email threat analysis tool that inspects `.eml` files for phishing
 
 | Step | Module | Input | Output |
 |------|--------|-------|--------|
-| 1 | `email_parser.py` | Raw `.eml` bytes | `ParsedEmail` dict |
-| 2 | `header_analyzer.py` | `ParsedEmail` | `HeaderAnalysisResult` |
-| 3 | `phishing_model.py` | Email subject + body text | `NLPResult` |
-| 4 | `url_analyzer.py` | Parsed email body / HTML URLs | `URLAnalysisResult` |
-| 5 | `ip_analyzer.py` | Received chain | `IPResult` |
-| 6 | `risk_engine.py` | Steps 2–5 results | `FinalResult` |
+| 1 | `analyzers/email_parser.py` | Raw `.eml` bytes | `ParsedEmail` dict |
+| 2 | `analyzers/header_analyzer.py` | `ParsedEmail` | `HeaderAnalysisResult` |
+| 3 | `ml/phishing_model.py` | Email subject + body text | `NLPResult` |
+| 4 | `analyzers/url_analyzer.py` | Parsed email body / HTML URLs | `URLAnalysisResult` |
+| 5 | `analyzers/ip_analyzer.py` | Received chain | `IPResult` |
+| 6 | `analyzers/risk_engine.py` | Steps 2–5 results | `FinalResult` |
 
 > **Note:** The backend runs the live analysis pipeline: parser, header checks, NLP classification, URL analysis, IP intelligence, and evidence-aware final risk scoring.
 
@@ -222,16 +222,43 @@ The API allows cross-origin requests from:
 ```
 AI-Email-Threat-Detector/
 ├── backend/
-│   ├── main.py               # FastAPI app & live analysis route
-│   ├── email_parser.py        # .eml parsing
-│   ├── header_analyzer.py     # SPF / DKIM / DMARC analysis
-│   ├── phishing_model.py      # NLP phishing classification
-│   ├── url_analyzer.py        # URL extraction and phishing signal analysis
-│   ├── ip_analyzer.py         # IP geolocation & risk scoring
-│   ├── risk_engine.py         # Evidence-aware final risk aggregation
-│   ├── requirements.txt       # Python dependencies
-│   └── PARSER_README.md       # Email parser docs
-└── frontend/                  # React UI (TBD)
+│   ├── main.py                  # FastAPI application entrypoint & API routes
+│   ├── analyzers/               # Core email threat analysis engines
+│   │   ├── email_parser.py      # .eml RFC-822 MIME parsing
+│   │   ├── header_analyzer.py   # SPF / DKIM / DMARC & domain lookalike checks
+│   │   ├── url_analyzer.py      # URL intelligence & brand spoofing detection
+│   │   ├── ip_analyzer.py       # Received hop parsing, IP geo & ISP reputation
+│   │   └── risk_engine.py       # Evidence-aware multi-vector risk scorer
+│   ├── database/                # Persistence & ORM layer
+│   │   ├── db.py                # SQLAlchemy engine & session maker
+│   │   ├── models.py            # AnalyzedEmail & Incident models
+│   │   └── db_seed.py           # Database seeding utilities
+│   ├── ml/                      # Machine learning & NLP classification
+│   │   ├── phishing_model.py    # Phishing NLP classifier (heuristics + TF-IDF)
+│   │   ├── dataset_builder.py   # Dataset builder & sampler
+│   │   ├── train_llm.py         # DistilBERT fine-tuning pipeline
+│   │   └── push_to_hub.py       # Hugging Face hub deployment
+│   ├── alerts/                  # Security notifications
+│   │   └── webhook.py           # Webhook dispatcher for HIGH/CRITICAL threats
+│   ├── ingestion/               # Automated email ingestion
+│   │   ├── imap_poller.py       # Background IMAP mailbox poller
+│   │   ├── processor.py         # Ingestion processor
+│   │   ├── scheduler.py         # Periodic polling scheduler
+│   │   └── state.py             # UID tracking state
+│   ├── tests/                   # Integration and unit test suites
+│   │   ├── test_integration.py  # End-to-end API & DB integration tests
+│   │   ├── test_url_analyzer.py # Comprehensive URL analyzer test suite
+│   │   └── conftest.py          # Pytest path configuration
+│   ├── requirements.txt         # Python dependencies
+│   └── PARSER_README.md         # Email parser documentation
+└── frontend/                    # React + Vite web application
+    ├── src/
+    │   ├── UserPortal.jsx       # User email upload & quick text scanning
+    │   ├── Dashboard.jsx        # SOC Operations Center dashboard
+    │   ├── SOCSummaryCharts.jsx # Real-time verdicts & threat keyword charts
+    │   ├── SOCIncidentQueue.jsx # Incident & analyzed email triage queue
+    │   └── SOCDetailDrawer.jsx  # Deep forensic analysis drawer
+```
 
 ---
 

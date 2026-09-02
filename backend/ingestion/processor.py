@@ -5,12 +5,17 @@ from pathlib import Path
 import requests
 from dotenv import load_dotenv
 
-from backend.email_parser import parse_email
-from backend.ingestion.imap_poller import fetch_emails_after_uid
-from backend.ingestion.state import (
-    load_last_uid,
-    save_last_uid,
-)
+try:
+    from analyzers.email_parser import parse_email
+except ImportError:
+    from backend.analyzers.email_parser import parse_email
+
+try:
+    from ingestion.imap_poller import fetch_emails_after_uid
+    from ingestion.state import load_last_uid, save_last_uid
+except ImportError:
+    from backend.ingestion.imap_poller import fetch_emails_after_uid
+    from backend.ingestion.state import load_last_uid, save_last_uid
 
 
 # Load backend/.env
@@ -20,7 +25,7 @@ load_dotenv(ENV_PATH)
 
 ANALYZE_API_URL = os.getenv(
     "ANALYZE_API_URL",
-    "http://127.0.0.1:8000/analyze"
+    "http://127.0.0.1:8000/api/analyze"
 )
 
 

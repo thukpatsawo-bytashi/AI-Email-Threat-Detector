@@ -1,17 +1,17 @@
 """
 SQLAlchemy database foundation.
-
-Models import Base from this module. The application does not create tables or
-persist analysis results yet; that belongs to the next persistence phase.
 """
 
 import os
+from pathlib import Path
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./threat_detector.db")
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+DEFAULT_DB_FILE = BACKEND_DIR / "threat_detector.db"
+DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{DEFAULT_DB_FILE.as_posix()}")
 
 engine_kwargs = {}
 if DATABASE_URL.startswith("sqlite"):

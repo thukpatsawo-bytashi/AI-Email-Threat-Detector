@@ -79,6 +79,16 @@ HEURISTIC_WEIGHTS = {
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "phishing_classifier_model.pkl")
 VECTORIZER_PATH = os.path.join(os.path.dirname(__file__), "phishing_classifier_vectorizer.pkl")
 
+if not os.path.exists(MODEL_PATH):
+    alt_m = os.path.join(os.path.dirname(__file__), "..", "phishing_classifier_model.pkl")
+    if os.path.exists(alt_m):
+        MODEL_PATH = alt_m
+
+if not os.path.exists(VECTORIZER_PATH):
+    alt_v = os.path.join(os.path.dirname(__file__), "..", "phishing_classifier_vectorizer.pkl")
+    if os.path.exists(alt_v):
+        VECTORIZER_PATH = alt_v
+
 
 # Built-in robust training corpus (50+ diverse examples)
 TRAINING_CORPUS = [
