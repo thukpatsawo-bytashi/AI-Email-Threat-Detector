@@ -110,12 +110,26 @@ def network_points(ip_score: int) -> int:
     return 0
 
 
+def url_risk_points(url_score: int) -> int:
+    """Map aggregate URL phishing score (0-100) to risk engine points (0-20)."""
+    if url_score >= 70:
+        return 20
+    if url_score >= 50:
+        return 15
+    if url_score >= 30:
+        return 10
+    if url_score >= 15:
+        return 5
+    return 0
+
+
 def synergy_points(
     content: int,
     authentication: int,
     identity: int,
     domain: int,
     network: int,
+    url: int = 0,
 ) -> int:
     points = 0
     if content >= 30 and authentication >= 15:
@@ -128,7 +142,12 @@ def synergy_points(
         points += 5
     if network >= 10 and (authentication >= 15 or domain >= 15):
         points += 4
-    return cap(points, 20)
+    # URL synergy: phishing URLs corroborated by content or auth failures
+    if url >= 10 and content >= 15:
+        points += 6
+    if url >= 10 and (authentication >= 15 or domain >= 15):
+        points += 4
+    return cap(points, 25)
 
 
 def classify_risk(risk_score: int) -> str:
@@ -158,7 +177,8 @@ def apply_evidence_caps(risk_score: int, evidence_sources: list[str], content: i
 def compute(
     header_result: dict,
     nlp_result: dict,
-    ip_result: dict
+    ip_result: dict,
+    url_result: dict | None = None,
 ) -> dict:
     """
     Calculate the composite email risk score and classification.
@@ -187,7 +207,13 @@ def compute(
     identity = identity_points(header_result, anomalies)
     domain = domain_points(header_result, anomalies)
     network = network_points(ip_score)
-    synergy = synergy_points(content, authentication, identity, domain, network)
+
+    # URL risk integration
+    url_data = url_result or {}
+    url_score_raw = int(url_data.get("url_risk_score", 0) or 0)
+    url = url_risk_points(url_score_raw)
+
+    synergy = synergy_points(content, authentication, identity, domain, network, url)
 
     evidence_sources = []
     if content >= 15:
@@ -200,8 +226,10 @@ def compute(
         evidence_sources.append("domain")
     if network > 0:
         evidence_sources.append("network")
+    if url > 0:
+        evidence_sources.append("url")
 
-    risk_score = content + authentication + identity + domain + network + synergy
+    risk_score = content + authentication + identity + domain + network + url + synergy
 
     auth_passes = sum(1 for status in auth_statuses if status == "pass")
     auth_missing = sum(1 for status in auth_statuses if status == "none")
@@ -258,6 +286,18 @@ def compute(
         isp = str(ip_result.get("geo", {}).get("isp", "Unknown"))
         add_reason(f"Risky sending network ({primary_ip or 'unknown'}) associated with {isp}")
 
+    # URL evidence
+    if url >= 5:
+        url_evidence = url_data.get("url_evidence", [])
+        for ev in url_evidence[:3]:
+            add_reason(str(ev))
+        mal_count = int(url_data.get("malicious_url_count", 0) or 0)
+        sus_count = int(url_data.get("suspicious_url_count", 0) or 0)
+        if mal_count and not has_reason_token("malicious url"):
+            add_reason(f"{mal_count} malicious URL(s) detected in email body")
+        elif sus_count and not has_reason_token("suspicious url"):
+            add_reason(f"{sus_count} suspicious URL(s) detected in email body")
+
     if not reasons:
         if auth_passes >= 2 and nlp_score < 50 and ip_score < 35:
             add_reason("No strong malicious evidence found; authentication and content signals look benign")
@@ -289,6 +329,7 @@ def compute(
             "nlp": nlp_score,
             "header": header_score,
             "ip": ip_score,
+            "url": url_score_raw,
         },
         "risk_metrics": {
             "content": content,
@@ -296,6 +337,7 @@ def compute(
             "identity": identity,
             "domain": domain,
             "network": network,
+            "url": url,
             "synergy": synergy,
             "evidence_sources": evidence_sources,
             "auth_passes": auth_passes,

@@ -99,6 +99,41 @@ def extract_body(email_message) -> str:
     return ""
 
 
+def extract_raw_html(email_message) -> str:
+    """
+    Return concatenated text/html parts for URL analysis.
+    """
+    html_parts = []
+
+    if email_message.is_multipart():
+        for part in email_message.walk():
+            content_disposition = str(part.get_content_disposition() or "").lower()
+            if content_disposition == "attachment":
+                continue
+
+            if part.get_content_type() != "text/html":
+                continue
+
+            try:
+                content = part.get_content()
+            except Exception:
+                payload = part.get_payload(decode=True)
+                content = payload.decode(errors="replace") if payload else ""
+
+            if content:
+                html_parts.append(str(content))
+    elif email_message.get_content_type() == "text/html":
+        try:
+            content = email_message.get_content()
+        except Exception:
+            payload = email_message.get_payload(decode=True)
+            content = payload.decode(errors="replace") if payload else ""
+        if content:
+            html_parts.append(str(content))
+
+    return "\n\n".join(html_parts)
+
+
 def extract_raw_headers(email_message) -> dict[str, str]:
     """
     Convert all email headers into a dictionary of string values.
@@ -143,6 +178,7 @@ def parse_email(file_data: bytes) -> dict:
         "return_path": return_path_header,
         "message_id": message_id_header,
         "body": extract_body(email_message),
+        "raw_html": extract_raw_html(email_message),
         "raw_headers": extract_raw_headers(email_message),
         "received_chain": parse_received_headers(email_message),
     }
