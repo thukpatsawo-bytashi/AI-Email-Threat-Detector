@@ -22,14 +22,24 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
-from db import Base, engine, get_db
-from email_parser import parse_email
-from header_analyzer import analyze as analyze_headers
-from ip_analyzer import analyze as analyze_ip
-from models import AnalyzedEmail, Incident, IncidentStatus
-from phishing_model import classify as classify_nlp
-from risk_engine import compute as compute_risk
-from url_analyzer import analyze_urls
+import sys
+from pathlib import Path
+
+# Ensure backend root is always on sys.path
+BACKEND_DIR = Path(__file__).resolve().parent
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
+from database import Base, engine, get_db, AnalyzedEmail, Incident, IncidentStatus
+from analyzers import (
+    parse_email,
+    analyze_headers,
+    analyze_ip,
+    analyze_urls,
+    compute_risk,
+)
+from ml import classify_nlp
+from alerts.webhook import send_alert
 
 
 def utcnow() -> datetime:
@@ -234,6 +244,21 @@ def execute_analysis_pipeline(parsed: dict, filename: str, db: Session) -> dict[
         db.commit()
         db.refresh(incident)
         incident_id = incident.id
+
+        # Dispatch real-time webhook alert for elevated threats
+        if classification in ("CRITICAL", "HIGH"):
+            try:
+                send_alert(
+                    severity=classification,
+                    subject=analyzed_email.subject,
+                    details={
+                        "risk_score": f"{risk_score}/100",
+                        "sender": analyzed_email.sender,
+                        "summary": primary_reason,
+                    }
+                )
+            except Exception:
+                pass
 
     response_payload["analyzed_email_id"] = analyzed_email.id
     response_payload["incident_id"] = incident_id

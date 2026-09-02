@@ -8,7 +8,10 @@ is empty, giving analysts rich data to explore on initial launch.
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 
-from models import AnalyzedEmail, Incident, IncidentStatus
+try:
+    from .models import AnalyzedEmail, Incident, IncidentStatus
+except ImportError:
+    from database.models import AnalyzedEmail, Incident, IncidentStatus
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)

@@ -18,7 +18,7 @@ Tests cover:
 
 import pytest
 
-from url_analyzer import (
+from analyzers.url_analyzer import (
     analyze_single_url,
     analyze_urls,
     normalize_url,

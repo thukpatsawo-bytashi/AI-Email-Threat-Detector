@@ -87,8 +87,7 @@ def test_full_flow():
     assert len(charts["top_terms"]) > 0
 
     # 9. Clean up test records so tests never pollute the live database
-    from db import SessionLocal
-    from models import Incident, AnalyzedEmail
+    from database import SessionLocal, Incident, AnalyzedEmail
     clean_db = SessionLocal()
     try:
         clean_db.query(Incident).filter(Incident.id == new_inc_id).delete()
