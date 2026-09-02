@@ -10,6 +10,23 @@ import re
 import os
 import math
 import joblib
+from transformers import pipeline
+
+# The Hugging Face repository where the fine-tuned DistilBERT model is hosted
+NLP_MODEL_REPO = "bixby404/phishing-detection"
+
+# Cache the pipeline in memory so we don't reload it for every email
+_nlp_pipeline = None
+
+def load_nlp_pipeline():
+    global _nlp_pipeline
+    if _nlp_pipeline is None:
+        try:
+            _nlp_pipeline = pipeline("text-classification", model=NLP_MODEL_REPO, tokenizer=NLP_MODEL_REPO)
+        except Exception as e:
+            print(f"Failed to load NLP model: {e}")
+            _nlp_pipeline = False  # Mark as failed so we don't keep trying
+    return _nlp_pipeline
 
 # High-signal term weights by category
 HEURISTIC_WEIGHTS = {
@@ -222,7 +239,34 @@ def classify(body_text: str) -> dict:
     body_lower = body_text.lower()
     flagged_terms = extract_flagged_terms(body_lower)
 
-    # 1. Attempt ML Model Classification
+    # 1. Attempt Hugging Face DistilBERT LLM Classification
+    try:
+        nlp = load_nlp_pipeline()
+        if nlp:
+            # Run inference
+            truncated_text = body_text[:2000]
+            result = nlp(truncated_text)[0]
+            
+            label = result['label']
+            score = int(result['score'] * 100)
+            
+            if label == "LABEL_1" or label == 1:
+                final_prob = score
+                legit_prob = 100 - score
+            else:
+                legit_prob = score
+                final_prob = 100 - score
+                
+            return {
+                "phishing_probability": final_prob,
+                "legitimate_probability": legit_prob,
+                "flagged_terms": flagged_terms,
+                "method": "llm_classifier"
+            }
+    except Exception as e:
+        pass
+
+    # 2. Attempt TF-IDF Scikit-Learn Model Classification (Fallback)
     try:
         ensure_ml_model_trained()
         if os.path.exists(MODEL_PATH) and os.path.exists(VECTORIZER_PATH):
