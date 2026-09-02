@@ -40,10 +40,117 @@ app.add_middleware(
 )
 
 
+FAKE_INCIDENTS = [
+    {
+        "id": 1,
+        "analyzed_email_id": 101,
+        "title": "Credential phishing attempt",
+        "severity": "critical",
+        "status": "new",
+        "sender": "Billing Department <billing@company-payments.xyz>",
+        "subject": "URGENT: Outstanding Invoice #INV-92841",
+        "risk_score": 100,
+        "classification": "CRITICAL",
+        "evidence_level": "STRONG",
+        "assigned_to": None,
+        "created_at": "2026-09-02T09:00:00Z",
+        "updated_at": "2026-09-02T09:00:00Z",
+    },
+    {
+        "id": 2,
+        "analyzed_email_id": 102,
+        "title": "Suspicious login URL review",
+        "severity": "medium",
+        "status": "investigating",
+        "sender": "Security Notice <alerts@example-support.com>",
+        "subject": "Review recent account activity",
+        "risk_score": 52,
+        "classification": "MEDIUM",
+        "evidence_level": "MODERATE",
+        "assigned_to": "soc-analyst@example.com",
+        "created_at": "2026-09-02T10:15:00Z",
+        "updated_at": "2026-09-02T10:40:00Z",
+    },
+]
+
+
 @app.get("/")
 def root():
     """Health check endpoint."""
     return {"message": "AI Email Threat Detector API is running"}
+
+
+@app.get("/api/incidents")
+def list_incidents():
+    """Temporary SOC incident list stub; does not query persistence yet."""
+    return {
+        "items": FAKE_INCIDENTS,
+        "total": len(FAKE_INCIDENTS),
+    }
+
+
+@app.get("/api/incidents/{incident_id}")
+def get_incident(incident_id: int):
+    """Temporary SOC incident detail stub; does not query persistence yet."""
+    for incident in FAKE_INCIDENTS:
+        if incident["id"] == incident_id:
+            return {
+                **incident,
+                "summary": "Mock incident detail for SOC workflow integration.",
+                "reasons": [
+                    "SPF authentication failed",
+                    "Sender/Reply-To mismatch detected",
+                    "Strong phishing-language evidence",
+                ],
+                "timeline": [
+                    {
+                        "timestamp": incident["created_at"],
+                        "event": "Incident created from analysis result",
+                    },
+                    {
+                        "timestamp": incident["updated_at"],
+                        "event": f"Status is {incident['status']}",
+                    },
+                ],
+            }
+
+    raise HTTPException(status_code=404, detail="Incident not found")
+
+
+@app.get("/api/stats/summary")
+def get_stats_summary():
+    """Temporary SOC summary stats stub; does not calculate from persistence yet."""
+    return {
+        "total_analyzed_emails": 128,
+        "total_incidents": len(FAKE_INCIDENTS),
+        "open_incidents": 2,
+        "critical_incidents": 1,
+        "high_risk_emails": 14,
+        "average_risk_score": 37,
+    }
+
+
+@app.get("/api/stats/incidents")
+def get_incident_stats():
+    """Temporary incident distribution stats stub; does not query persistence yet."""
+    return {
+        "by_status": {
+            "new": 1,
+            "open": 0,
+            "investigating": 1,
+            "escalated": 0,
+            "resolved": 0,
+            "false_positive": 0,
+            "closed": 0,
+        },
+        "by_severity": {
+            "low": 0,
+            "medium": 1,
+            "high": 0,
+            "critical": 1,
+        },
+        "recent_incidents": FAKE_INCIDENTS,
+    }
 
 
 @app.post("/api/analyze")
