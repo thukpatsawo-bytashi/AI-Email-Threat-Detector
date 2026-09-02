@@ -16,6 +16,9 @@ __pycache__/
 # VS Code
 .vscode/
 
+.env.example
+.env
+
 # Node
 node_modules/
 frontend/node_modules
