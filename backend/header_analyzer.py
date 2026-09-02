@@ -1,73 +1,182 @@
+"""
+Header Analyzer Module
+
+Analyzes email headers for:
+- Email authentication failures (SPF, DKIM, DMARC)
+- Sender identity spoofing (From vs Reply-To vs Return-Path mismatch)
+- Display name impersonation (e.g. "PayPal Support" from an unrelated domain)
+- Domain lookalikes, typosquatting, and suspicious TLDs
+- Domain age / newly registered domain detection via RDAP
+- Calculates a weighted header risk score (0-100) and anomalies list.
+"""
+
 import json
 import re
 import urllib.request
 import urllib.error
+import email.utils
 from datetime import datetime
+from functools import lru_cache
 
-# Hardcoded fallback table for the live demo.
-# If the live lookup fails or times out, we use these values.
+# Fallback lookup table for demo consistency
 DEMO_WHOIS_FALLBACK = {
     "company-payments.xyz": 3,
+    "paypa1-security.xyz": 2,
     "evil.xyz": 1,
     "paypal.com": 9000,
     "example.com": 10000,
-    "gmail.com": 10000
+    "gmail.com": 10000,
+    "microsoft.com": 11000,
+    "google.com": 10000,
+    "apple.com": 12000,
+    "amazon.com": 10500,
 }
 
-def get_domain_age_days(domain: str):
+# High-profile brands frequently targeted by phishing
+TARGETED_BRANDS = [
+    "paypal", "google", "microsoft", "apple", "amazon", "netflix",
+    "chase", "bankofamerica", "wellsfargo", "dhl", "fedex", "ups",
+    "docusign", "irs", "facebook", "instagram", "linkedin", "dropbox",
+    "coinbase", "binance", "metamask", "whatsapp", "adobe"
+]
+
+SUSPICIOUS_TLDS = [
+    ".xyz", ".top", ".club", ".online", ".site", ".buzz", ".work",
+    ".icu", ".tk", ".ml", ".ga", ".cf", ".gq", ".zip", ".mov",
+    ".fit", ".cfd", ".sbs", ".rest"
+]
+
+
+def extract_email_address(raw_header: str) -> tuple[str, str, str]:
     """
-    Attempts to find the age of a domain in days. 
-    Strict 2-second timeout to protect the live demo.
+    Parses an RFC-822 header like 'PayPal Support <support@paypal.com>'
+    Returns (display_name, email_address, domain).
+    """
+    if not raw_header:
+        return ("", "", "")
+
+    display_name, addr = email.utils.parseaddr(str(raw_header))
+    addr = addr.strip().lower()
+    display_name = display_name.strip()
+
+    domain = ""
+    if "@" in addr:
+        domain = addr.split("@")[-1].strip().lower()
+
+    return (display_name, addr, domain)
+
+
+@lru_cache(maxsize=256)
+def get_domain_age_days(domain: str) -> int | None:
+    """
+    Attempts to find the age of a domain in days.
+    Checks demo cache first, then tries live RDAP lookup with a 2-second timeout.
     """
     if not domain:
         return None
-        
-    # 1. Always check the safety fallback table first for demo domains
+
+    # 1. Safety fallback table for demo stability
     if domain in DEMO_WHOIS_FALLBACK:
         return DEMO_WHOIS_FALLBACK[domain]
-        
-    # 2. Attempt a live RDAP (WHOIS) lookup
+
+    # 2. Attempt live RDAP (RFC 7482 / 9082) lookup
     try:
         url = f"https://rdap.org/domain/{domain}"
-        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "AIEmailThreatDetector/1.0"}
+        )
         with urllib.request.urlopen(req, timeout=2.0) as response:
             data = json.loads(response.read().decode())
-            # Search for the registration event
             for event in data.get("events", []):
-                if event.get("eventAction") == "registration":
+                if event.get("eventAction") in ("registration", "transfer"):
                     reg_date_str = event.get("eventDate")
                     if reg_date_str:
-                        # Extract YYYY-MM-DD
                         reg_date = datetime.strptime(reg_date_str[:10], "%Y-%m-%d")
                         delta = datetime.utcnow() - reg_date
                         return max(0, delta.days)
     except Exception:
-        # If the network dies, the API rate limits us, or the domain is weird,
-        # fail gracefully so the app doesn't crash!
+        # Graceful failure on timeout, rate limit, or invalid domain
         pass
-        
+
     return None
 
-def analyze(parsed_email: dict) -> dict:
+
+def detect_domain_lookalike(domain: str, display_name: str) -> tuple[bool, str | None]:
     """
-    Analyzes email headers for authentication failures, spoofing attempts,
-    and domain anomalies.
+    Detects typosquatting, digit substitutions, brand impersonation,
+    or suspicious TLDs on a domain.
     """
-    # 1. Extract Email Authentication (SPF, DKIM, DMARC)
-    # Default to "none" if the header is missing entirely
+    if not domain:
+        return (False, None)
+
+    domain_lower = domain.lower()
+    parts = domain_lower.split(".")
+    base_domain = parts[0] if parts else ""
+
+    # Heuristic 1: Brand name in subdomain (e.g. paypal.com.security-verify.xyz)
+    for brand in TARGETED_BRANDS:
+        if brand in domain_lower and not domain_lower.endswith(f"{brand}.com") and not domain_lower.endswith(f"{brand}.org"):
+            return (True, f"Brand '{brand}' detected in untrusted domain '{domain}'")
+
+    # Heuristic 2: Digit-for-letter substitution in base domain (paypa1, g00gle, micros0ft)
+    if re.search(r"[a-z]+[0-9]+[a-z]*|[a-z]*[0-9]+[a-z]+", base_domain):
+        # Check if substituting numbers with letters resembles a targeted brand
+        variants = {
+            base_domain.translate(str.maketrans({"0": "o", "1": "l", "3": "e", "4": "a", "5": "s", "7": "t", "8": "b"})),
+            base_domain.translate(str.maketrans({"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "8": "b"})),
+        }
+        for brand in TARGETED_BRANDS:
+            if any(brand in variant or brand == variant for variant in variants):
+                return (True, f"Typosquatting/homoglyph detected mimicking '{brand}' ({domain})")
+        return (True, f"Suspicious alphanumeric substitution in domain name ({domain})")
+
+    # Heuristic 3: Display name claims to be a brand, but sender domain does not match
+    if display_name:
+        display_lower = display_name.lower()
+        for brand in TARGETED_BRANDS:
+            if brand in display_lower:
+                if not (domain_lower == f"{brand}.com" or domain_lower.endswith(f".{brand}.com")):
+                    return (True, f"Display name '{display_name}' impersonates '{brand}' but domain is '{domain}'")
+
+    # Heuristic 4: Suspicious / Disposable / High-abuse TLDs
+    for tld in SUSPICIOUS_TLDS:
+        if domain_lower.endswith(tld):
+            return (True, f"Suspicious high-risk top-level domain ({tld})")
+
+    return (False, None)
+
+
+def header_value(raw_headers: dict, header_name: str) -> str:
+    """
+    Fetch a header value case-insensitively from parser-normalized headers.
+    """
+    header_name = header_name.lower()
+    for key, value in raw_headers.items():
+        if key.lower() == header_name:
+            return str(value)
+    return ""
+
+
+def parse_authentication_results(raw_headers: dict) -> tuple[str, str, str]:
+    """
+    Extracts SPF, DKIM, and DMARC status from Authentication-Results,
+    Received-SPF, or ARC-Authentication-Results headers.
+    """
     spf = "none"
     dkim = "none"
     dmarc = "none"
-    
-    raw_headers = parsed_email.get("raw_headers", {})
-    auth_results = raw_headers.get("Authentication-Results", "")
-    
-    if auth_results:
-        # Look for spf=, dkim=, dmarc= followed by pass, fail, or none
-        spf_match = re.search(r'spf=(pass|fail|none)', auth_results, re.IGNORECASE)
-        dkim_match = re.search(r'dkim=(pass|fail|none)', auth_results, re.IGNORECASE)
-        dmarc_match = re.search(r'dmarc=(pass|fail|none)', auth_results, re.IGNORECASE)
-        
+
+    # 1. Inspect Authentication-Results header
+    auth_results = header_value(raw_headers, "Authentication-Results")
+    arc_results = header_value(raw_headers, "ARC-Authentication-Results")
+    all_auth = f"{auth_results} {arc_results}"
+
+    if all_auth.strip():
+        spf_match = re.search(r"spf=(pass|fail|softfail|neutral|none|temperror|permerror)", all_auth, re.IGNORECASE)
+        dkim_match = re.search(r"dkim=(pass|fail|neutral|none|temperror|permerror)", all_auth, re.IGNORECASE)
+        dmarc_match = re.search(r"dmarc=(pass|fail|neutral|none|temperror|permerror)", all_auth, re.IGNORECASE)
+
         if spf_match:
             spf = spf_match.group(1).lower()
         if dkim_match:
@@ -75,87 +184,79 @@ def analyze(parsed_email: dict) -> dict:
         if dmarc_match:
             dmarc = dmarc_match.group(1).lower()
 
-    # 2. Check for Sender/Reply-To Mismatch
+    # 2. Check Received-SPF header if SPF still none or missing
+    if spf == "none":
+        received_spf = header_value(raw_headers, "Received-SPF")
+        if received_spf:
+            r_match = re.search(r"^(pass|fail|softfail|neutral|none)", received_spf.strip(), re.IGNORECASE)
+            if r_match:
+                spf = r_match.group(1).lower()
+
+    return (spf, dkim, dmarc)
+
+
+def analyze(parsed_email: dict) -> dict:
+    """
+    Analyzes email headers for spoofing, authentication failures,
+    domain reputation, and lookalike domains.
+    """
+    raw_headers = parsed_email.get("raw_headers", {})
+    from_header = parsed_email.get("from", "")
+    reply_to_header = parsed_email.get("reply_to", "")
+    return_path_header = parsed_email.get("return_path", "")
+
+    # 1. Parse email addresses and domains
+    display_name, from_addr, from_domain = extract_email_address(from_header)
+    _, reply_addr, reply_domain = extract_email_address(reply_to_header)
+    _, return_addr, return_domain = extract_email_address(return_path_header)
+
+    # 2. Extract Authentication (SPF, DKIM, DMARC)
+    spf, dkim, dmarc = parse_authentication_results(raw_headers)
+
+    # 3. Sender Identity Mismatch Checks
     sender_reply_mismatch = False
-    from_address = parsed_email.get("from", "")
-    reply_to_address = parsed_email.get("reply_to", "")
-    
-    if reply_to_address:
-        # Extract domains (everything after the @)
-        from_domain = from_address.split('@')[-1].strip().lower() if '@' in from_address else ""
-        reply_domain = reply_to_address.split('@')[-1].strip().lower() if '@' in reply_to_address else ""
-        
-        if from_domain and reply_domain and from_domain != reply_domain:
-            sender_reply_mismatch = True
-
-    # 3. Check for Domain Lookalikes (Simple Heuristics)
-    domain_lookalike = False
-    # Ensure from_domain is defined even if not extracted above
-    from_address = parsed_email.get("from", "")
-    from_domain = from_address.split('@')[-1].strip().lower() if '@' in from_address else ""
-    
-    if from_domain:
-        base_domain = from_domain.split('.')[0] # Get the part before the TLD
-        
-        # Heuristic A: Digit-for-letter substitution (e.g., paypa1, goog1e)
-        # Checks if there is a number mixed with letters in the base domain
-        if re.search(r'[a-z]+[0-9]+[a-z]*|[a-z]*[0-9]+[a-z]+', base_domain):
-            domain_lookalike = True
-            
-        # Heuristic B: Unexpected/Suspicious TLDs on the domain
-        suspicious_tlds = ['.xyz', '.top', '.club', '.online', '.site']
-        if any(from_domain.endswith(tld) for tld in suspicious_tlds):
-            domain_lookalike = True
-            
-    # 4. Fetch Domain Age (STRETCH GOAL)
-    domain_age_days = get_domain_age_days(from_domain) if from_domain else None
-
-    # 5. Generate Anomalies and Calculate Risk Score
     anomalies = []
     header_risk_score = 0
-    
-    # --- Scoring Weights ---
-    # Authentication Failures: 20 pts each (60 total)
-    # Authentication Missing (none): 10 pts each
-    # Sender/Reply-To Mismatch: 30 pts
-    # Domain Lookalike: 40 pts
-    # Newly Registered Domain (<30 days): 30 pts
-    # Total score is capped at 100.
-    
-    if spf == "fail":
-        anomalies.append("SPF authentication failed")
-        header_risk_score += 20
-    elif spf == "none":
-        # We don't penalize as heavily for missing records, but it is an anomaly
-        header_risk_score += 10
-        
-    if dkim == "fail":
-        anomalies.append("DKIM authentication failed")
-        header_risk_score += 20
-    elif dkim == "none":
-        header_risk_score += 10
-        
-    if dmarc == "fail":
-        anomalies.append("DMARC authentication failed")
-        header_risk_score += 20
-    elif dmarc == "none":
-        header_risk_score += 10
-        
-    if sender_reply_mismatch:
-        anomalies.append("Sender identity mismatch (From vs Reply-To)")
-        header_risk_score += 30
-        
-    if domain_lookalike:
-        anomalies.append("Domain lookalike detected (suspicious TLD or typosquatting)")
-        header_risk_score += 40
-        
-    if domain_age_days is not None and domain_age_days < 30:
-        anomalies.append(f"Newly registered domain (only {domain_age_days} days old)")
-        header_risk_score += 30
-        
-    # Cap score at 100
-    header_risk_score = min(100, header_risk_score)
 
+    if reply_domain and from_domain and reply_domain != from_domain:
+        sender_reply_mismatch = True
+        anomalies.append(f"Sender identity mismatch: From ({from_domain}) vs Reply-To ({reply_domain})")
+        header_risk_score += 30
+
+    if return_domain and from_domain and return_domain != from_domain:
+        # Return-Path envelope mismatch
+        anomalies.append(f"Envelope sender mismatch: From ({from_domain}) vs Return-Path ({return_domain})")
+        header_risk_score += 15
+
+    # 4. Domain Lookalike & Brand Impersonation
+    domain_lookalike, lookalike_reason = detect_domain_lookalike(from_domain, display_name)
+    if domain_lookalike:
+        anomalies.append(lookalike_reason or "Domain lookalike detected (suspicious TLD or typosquatting)")
+        header_risk_score += 40
+
+    # 5. Domain Age Lookup
+    domain_age_days = get_domain_age_days(from_domain) if from_domain else None
+    if domain_age_days is not None and domain_age_days < 30:
+        anomalies.append(f"Newly registered domain (only {domain_age_days} day{'s' if domain_age_days != 1 else ''} old)")
+        header_risk_score += 30
+
+    # 6. Authentication Failures Scoring
+    if spf in ("fail", "softfail"):
+        anomalies.append(f"SPF authentication failed ({spf})")
+        header_risk_score += 20
+
+    if dkim == "fail":
+        anomalies.append("DKIM cryptographic signature verification failed")
+        header_risk_score += 20
+
+    if dmarc in ("fail", "softfail"):
+        anomalies.append("DMARC policy check failed")
+        header_risk_score += 20
+
+    # Cap score at 100
+    header_risk_score = max(0, min(100, header_risk_score))
+
+    # Normalize output format matching the contract
     return {
         "spf": spf,
         "dkim": dkim,
@@ -164,29 +265,22 @@ def analyze(parsed_email: dict) -> dict:
         "domain_lookalike": domain_lookalike,
         "domain_age_days": domain_age_days,
         "anomalies": anomalies,
-        "header_risk_score": header_risk_score
+        "header_risk_score": header_risk_score,
     }
 
+
 if __name__ == "__main__":
-    # Hardcoded mock input that perfectly matches what M2 will eventually send us.
-    # We use this so we can test our code completely independently.
-    mock_parsed_email = {
-        "from": "billing@company-payments.xyz",
+    test_parsed = {
+        "from": '"PayPal Security" <service@company-payments.xyz>',
         "to": "victim@example.com",
         "subject": "URGENT: Outstanding Invoice",
         "reply_to": "payments.help@gmail.com",
         "return_path": "bounce@evil.xyz",
-        "message_id": "<12345@evil.xyz>",
-        "body": "Your account will be suspended...",
         "raw_headers": {
             "Authentication-Results": "spf=fail dkim=fail dmarc=fail"
         },
-        "received_chain": [
-            "Received: from suspicious-server...", 
-            "Received: by another-mail-server..."
-        ]
+        "received_chain": ["Received: from mail.evil.xyz by mx.google.com"]
     }
-
-    print("--- Running header_analyzer with mock input ---")
-    result = analyze(mock_parsed_email)
-    print(json.dumps(result, indent=2))
+    res = analyze(test_parsed)
+    print("Header analyzer result:")
+    print(json.dumps(res, indent=2))

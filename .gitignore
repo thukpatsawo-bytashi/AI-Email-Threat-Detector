@@ -1,0 +1,23 @@
+# Models and Datasets
+backend/nlp_model/
+backend/merged_dataset/
+backend/training_checkpoints/
+*.pkl
+*.csv
+
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Environment variables
+.env
+
+# VS Code
+.vscode/
+
+# Node
+node_modules/
+frontend/node_modules
+test.eml
+dist/
