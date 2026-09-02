@@ -10,7 +10,8 @@ import re
 import os
 import math
 import joblib
-from transformers import pipeline
+
+os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 
 # The Hugging Face repository where the fine-tuned DistilBERT model is hosted
 NLP_MODEL_REPO = "bixby404/phishing-detection"
@@ -22,10 +23,11 @@ def load_nlp_pipeline():
     global _nlp_pipeline
     if _nlp_pipeline is None:
         try:
+            import torch
+            from transformers import pipeline
             _nlp_pipeline = pipeline("text-classification", model=NLP_MODEL_REPO, tokenizer=NLP_MODEL_REPO)
         except Exception as e:
-            print(f"Failed to load NLP model: {e}")
-            _nlp_pipeline = False  # Mark as failed so we don't keep trying
+            _nlp_pipeline = False  # Mark as unavailable so we don't keep trying
     return _nlp_pipeline
 
 # High-signal term weights by category
