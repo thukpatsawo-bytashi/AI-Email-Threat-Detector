@@ -18,19 +18,7 @@ import email.utils
 from datetime import datetime
 from functools import lru_cache
 
-# Fallback lookup table for demo consistency
-DEMO_WHOIS_FALLBACK = {
-    "company-payments.xyz": 3,
-    "paypa1-security.xyz": 2,
-    "evil.xyz": 1,
-    "paypal.com": 9000,
-    "example.com": 10000,
-    "gmail.com": 10000,
-    "microsoft.com": 11000,
-    "google.com": 10000,
-    "apple.com": 12000,
-    "amazon.com": 10500,
-}
+
 
 # High-profile brands frequently targeted by phishing
 TARGETED_BRANDS = [
@@ -75,11 +63,7 @@ def get_domain_age_days(domain: str) -> int | None:
     if not domain:
         return None
 
-    # 1. Safety fallback table for demo stability
-    if domain in DEMO_WHOIS_FALLBACK:
-        return DEMO_WHOIS_FALLBACK[domain]
-
-    # 2. Attempt live RDAP (RFC 7482 / 9082) lookup
+    # Attempt live RDAP (RFC 7482 / 9082) lookup
     try:
         url = f"https://rdap.org/domain/{domain}"
         req = urllib.request.Request(

@@ -18,29 +18,7 @@ IP_CANDIDATE_PATTERN = re.compile(
     r"(?<![\w.:-])(?:\d{1,3}(?:\.\d{1,3}){3}|[0-9A-Fa-f]{0,4}:[0-9A-Fa-f:.]{2,})(?![\w.:-])"
 )
 
-# Fallback geolocation data for demo safety & test stability
-GEO_FALLBACKS = {
-    "185.123.45.67": {
-        "country": "Germany",
-        "city": "Frankfurt",
-        "isp": "Example Hosting Provider",
-    },
-    "209.85.220.65": {
-        "country": "United States",
-        "city": "Mountain View",
-        "isp": "Google LLC",
-    },
-    "192.30.252.141": {
-        "country": "United States",
-        "city": "San Francisco",
-        "isp": "GitHub Inc.",
-    },
-    "40.107.236.80": {
-        "country": "United States",
-        "city": "Redmond",
-        "isp": "Microsoft Corporation",
-    },
-}
+
 
 # Suspicious / Bulletproof / Anonymous Hosting provider patterns
 HIGH_RISK_ISP_KEYWORDS = [
@@ -108,21 +86,14 @@ def lookup_geo(ip: str) -> dict[str, str]:
     Performs IP geolocation lookup using ip-api.com with timeout.
     Falls back gracefully to GEO_FALLBACKS or generic defaults.
     """
-    fallback = GEO_FALLBACKS.get(
-        ip,
-        {
-            "country": "Unknown",
-            "city": "Unknown",
-            "isp": "Unknown Network",
-        }
-    )
+    default_unknown = {
+        "country": "Unknown",
+        "city": "Unknown",
+        "isp": "Unknown Network",
+    }
 
     if not ip or not is_public_ip(ip):
-        return fallback
-
-    # Check hardcoded table first for demo performance
-    if ip in GEO_FALLBACKS:
-        return GEO_FALLBACKS[ip]
+        return default_unknown
 
     try:
         url = f"http://ip-api.com/json/{ip}?fields=status,country,city,isp,org,as"
@@ -141,7 +112,7 @@ def lookup_geo(ip: str) -> dict[str, str]:
     except Exception:
         pass
 
-    return fallback
+    return default_unknown
 
 
 def calculate_ip_risk(geo: dict[str, str], ip: str) -> int:
