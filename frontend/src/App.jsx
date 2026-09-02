@@ -92,7 +92,7 @@ const Sidebar = () => {
       <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', gap: '12px' }}>
         <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: 'linear-gradient(to right, #60a5fa, #a78bfa)', flexShrink: 0 }}></div>
         <div>
-          <div style={{ fontWeight: '600', fontSize: '0.9rem' }}>SOC Analyst</div>
+          <div style={{ fontWeight: '600', fontSize: '0.9rem' }}>Mufeez</div>
           <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Online</div>
         </div>
       </div>
