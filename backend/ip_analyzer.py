@@ -1,17 +1,30 @@
+"""
+IP Analyzer Module
+
+Extracts public IP addresses from email Received headers, identifies the
+originating sender IP, performs IP geolocation and ISP intelligence lookups,
+and calculates an IP risk score.
+"""
+
 import ipaddress
 import re
 from typing import Any
+import urllib.request
+import json
+from functools import lru_cache
 
-
-# IPv4 pattern.
-IPV4_PATTERN = re.compile(
-    r"\b(?:\d{1,3}\.){3}\d{1,3}\b"
+# Broad candidate matcher; ipaddress performs final IPv4/IPv6 validation.
+IP_CANDIDATE_PATTERN = re.compile(
+    r"(?<![\w.:-])(?:\d{1,3}(?:\.\d{1,3}){3}|[0-9A-Fa-f]{0,4}:[0-9A-Fa-f:.]{2,})(?![\w.:-])"
 )
 
-
-# Demo fallback data.
-# Keep this limited to IPs used by your prepared demo emails.
+# Fallback geolocation data for demo safety & test stability
 GEO_FALLBACKS = {
+    "185.123.45.67": {
+        "country": "Germany",
+        "city": "Frankfurt",
+        "isp": "Example Hosting Provider",
+    },
     "209.85.220.65": {
         "country": "United States",
         "city": "Mountain View",
@@ -20,133 +33,154 @@ GEO_FALLBACKS = {
     "192.30.252.141": {
         "country": "United States",
         "city": "San Francisco",
-        "isp": "GitHub",
+        "isp": "GitHub Inc.",
+    },
+    "40.107.236.80": {
+        "country": "United States",
+        "city": "Redmond",
+        "isp": "Microsoft Corporation",
     },
 }
+
+# Suspicious / Bulletproof / Anonymous Hosting provider patterns
+HIGH_RISK_ISP_KEYWORDS = [
+    "bulletproof", "anonymous", "vpn", "proxy", "tor", "m247",
+    "leaseweb", "choopa", "vultr", "digitalocean", "linode",
+    "hetzner", "ovh", "hostinger", "datacenter", "hosting"
+]
+
+TRUSTED_MAIL_ISPS = [
+    "google", "microsoft", "apple", "amazon", "verizon",
+    "comcast", "at&t", "telekom", "spectrum", "charter", "orange"
+]
+
+
+def is_public_ip(ip_str: str) -> bool:
+    """
+    Checks if an IP string is a valid, routable public IP.
+    Filters private, loopback, link-local, multicast, and reserved ranges.
+    """
+    return normalize_public_ip(ip_str) is not None
+
+
+def normalize_public_ip(ip_str: str) -> str | None:
+    """
+    Return the normalized form of a public IPv4/IPv6 address, or None.
+    """
+    try:
+        ip_obj = ipaddress.ip_address(str(ip_str).strip("[]()<>.,;"))
+        if (
+            ip_obj.is_private
+            or ip_obj.is_loopback
+            or ip_obj.is_link_local
+            or ip_obj.is_reserved
+            or ip_obj.is_multicast
+            or ip_obj.is_unspecified
+        ):
+            return None
+        return str(ip_obj)
+    except ValueError:
+        return None
 
 
 def extract_public_ips(received_chain: list[str]) -> list[str]:
     """
-    Extract valid public IPv4 addresses from Received headers.
-
-    Note:
-    Received headers can be forged or altered by an attacker.
-    Therefore, extracted IPs are evidence/context, not proof of
-    the attacker's physical origin.
+    Extracts all unique public IPv4/IPv6 addresses across the Received headers.
+    Headers are inspected in reverse chronological order (originating hop first).
     """
+    if not received_chain:
+        return []
 
-    public_ips = []
+    extracted = []
+    # Received headers are prepended by each hop; the bottom header is closest to the sender
+    for header in reversed(received_chain):
+        for candidate in IP_CANDIDATE_PATTERN.findall(header):
+            ip = normalize_public_ip(candidate)
+            if ip and ip not in extracted:
+                extracted.append(ip)
 
-    for header in received_chain:
-        matches = IPV4_PATTERN.findall(header)
-
-        for ip in matches:
-            try:
-                ip_obj = ipaddress.ip_address(ip)
-            except ValueError:
-                continue
-
-            if ip_obj.version != 4:
-                continue
-
-            if (
-                ip_obj.is_private
-                or ip_obj.is_loopback
-                or ip_obj.is_link_local
-                or ip_obj.is_reserved
-                or ip_obj.is_multicast
-            ):
-                continue
-
-            if ip not in public_ips:
-                public_ips.append(ip)
-
-    return public_ips
+    return extracted
 
 
+@lru_cache(maxsize=512)
 def lookup_geo(ip: str) -> dict[str, str]:
     """
-    Look up IP geolocation using ip-api.com.
-
-    Falls back to the hardcoded demo table if the request fails.
+    Performs IP geolocation lookup using ip-api.com with timeout.
+    Falls back gracefully to GEO_FALLBACKS or generic defaults.
     """
-
     fallback = GEO_FALLBACKS.get(
         ip,
         {
             "country": "Unknown",
             "city": "Unknown",
-            "isp": "Unknown",
-        },
+            "isp": "Unknown Network",
+        }
     )
 
-    try:
-        import requests
-
-        response = requests.get(
-            f"http://ip-api.com/json/{ip}",
-            params={
-                "fields": "status,country,city,isp"
-            },
-            timeout=2,
-        )
-
-        response.raise_for_status()
-        data = response.json()
-
-        if data.get("status") != "success":
-            return fallback
-
-        return {
-            "country": data.get("country", "Unknown"),
-            "city": data.get("city", "Unknown"),
-            "isp": data.get("isp", "Unknown"),
-        }
-
-    except Exception:
+    if not ip or not is_public_ip(ip):
         return fallback
 
+    # Check hardcoded table first for demo performance
+    if ip in GEO_FALLBACKS:
+        return GEO_FALLBACKS[ip]
 
-def calculate_ip_risk(geo: dict[str, str]) -> int:
+    try:
+        url = f"http://ip-api.com/json/{ip}?fields=status,country,city,isp,org,as"
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "AIEmailThreatDetector/1.0"}
+        )
+        with urllib.request.urlopen(req, timeout=2.0) as response:
+            data = json.loads(response.read().decode())
+            if data.get("status") == "success":
+                return {
+                    "country": data.get("country", "Unknown") or "Unknown",
+                    "city": data.get("city", "Unknown") or "Unknown",
+                    "isp": data.get("isp") or data.get("org") or data.get("as") or "Unknown",
+                }
+    except Exception:
+        pass
+
+    return fallback
+
+
+def calculate_ip_risk(geo: dict[str, str], ip: str) -> int:
     """
-    Simple baseline IP risk heuristic.
-
-    This is intentionally lightweight for the prototype.
+    Calculates an IP risk score (0-100) based on ISP reputation and hosting signals.
     """
+    if not ip:
+        return 0
 
-    isp = geo.get("isp", "").lower()
+    isp_lower = str(geo.get("isp", "")).lower()
 
-    risky_patterns = [
-        "hosting",
-        "bulletproof",
-        "anonymous",
-        "vpn",
-        "proxy",
-    ]
+    if not isp_lower or isp_lower in ("unknown", "unknown network"):
+        return 0
 
-    for pattern in risky_patterns:
-        if pattern in isp:
+    # 1. Trusted legitimate email providers / residential ISPs
+    for trusted in TRUSTED_MAIL_ISPS:
+        if trusted in isp_lower:
+            return 5
+
+    # 2. Known VPN, Tor, Bulletproof, or Cloud Hosting senders
+    for risky in HIGH_RISK_ISP_KEYWORDS:
+        if risky in isp_lower:
             return 60
 
-    return 20
+    # 3. Public IP with no specific reputation evidence.
+    return 10
 
 
 def analyze(received_chain: list[str]) -> dict[str, Any]:
     """
-    Analyze the Received chain and return the exact IPResult shape.
+    Analyzes the Received chain and returns the exact IPResult shape.
     """
-
     extracted_ips = extract_public_ips(received_chain)
 
-    primary_ip = (
-        extracted_ips[0]
-        if extracted_ips
-        else ""
-    )
+    primary_ip = extracted_ips[0] if extracted_ips else ""
 
     if primary_ip:
         geo = lookup_geo(primary_ip)
-        ip_risk_score = calculate_ip_risk(geo)
+        ip_risk_score = calculate_ip_risk(geo, primary_ip)
     else:
         geo = {
             "country": "Unknown",
@@ -161,3 +195,13 @@ def analyze(received_chain: list[str]) -> dict[str, Any]:
         "geo": geo,
         "ip_risk_score": ip_risk_score,
     }
+
+
+if __name__ == "__main__":
+    test_chain = [
+        "Received: from mail.evil.xyz (unknown [185.123.45.67]) by mx.google.com with ESMTPS",
+        "Received: by mail-wm1-f41.google.com with SMTP id abc123"
+    ]
+    res = analyze(test_chain)
+    print("IP analyzer result:")
+    print(json.dumps(res, indent=2))
