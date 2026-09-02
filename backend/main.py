@@ -1,229 +1,540 @@
 """
 AI Email Threat Detector – Production FastAPI Application.
 
-POST /api/analyze  accepts a multipart .eml upload, runs it through the full
-threat detection pipeline (Email Parser -> Header Analyzer -> NLP Classifier ->
-IP Analyzer -> Risk Engine), and returns a single unified flat JSON response.
+Provides:
+- POST /api/analyze: Multi-stage email threat analysis from uploaded .eml files
+- POST /api/analyze-text: Multi-stage threat analysis from direct user input / pasted text
+- GET  /api/incidents: Real-time SOC incident queue with dynamic filtering
+- GET  /api/incidents/{id}: Detailed incident and email metadata
+- PATCH /api/incidents/{id}: Analyst triage actions (escalate, false positive, close)
+- GET  /api/stats/summary: 100% dynamic SOC statistics computed from real database records
+- GET  /api/stats/charts: 100% dynamic 7-day verdicts and aggregated threat terms
 """
 
-from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 import traceback
+from typing import Any
 
+from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Query
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+from sqlalchemy import desc
+
+from db import Base, engine, get_db
 from email_parser import parse_email
 from header_analyzer import analyze as analyze_headers
-from phishing_model import classify as classify_nlp
-from url_analyzer import analyze_urls
 from ip_analyzer import analyze as analyze_ip
+from models import AnalyzedEmail, Incident, IncidentStatus
+from phishing_model import classify as classify_nlp
 from risk_engine import compute as compute_risk
+from url_analyzer import analyze_urls
+
+
+def utcnow() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Ensure database schema is created cleanly with no artificial seeds
+    Base.metadata.create_all(bind=engine)
+    yield
+
 
 app = FastAPI(
     title="AI Email Threat Detector",
-    description="Email threat analysis API combining header analysis, NLP phishing detection, and IP reputation scoring.",
+    description="Email threat analysis API combining header analysis, NLP phishing detection, URL intelligence, and IP reputation scoring.",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
-# ── CORS – allow frontend dev servers ────────────────────────────────
+# ── CORS – allow frontend dev servers on any localhost port ───────────
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:5173",
-        "http://localhost:5174",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:5174",
-    ],
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-FAKE_INCIDENTS = [
-    {
-        "id": 1,
-        "analyzed_email_id": 101,
-        "title": "Credential phishing attempt",
-        "severity": "critical",
-        "status": "new",
-        "sender": "Billing Department <billing@company-payments.xyz>",
-        "subject": "URGENT: Outstanding Invoice #INV-92841",
-        "risk_score": 100,
-        "classification": "CRITICAL",
-        "evidence_level": "STRONG",
-        "assigned_to": None,
-        "created_at": "2026-09-02T09:00:00Z",
-        "updated_at": "2026-09-02T09:00:00Z",
-    },
-    {
-        "id": 2,
-        "analyzed_email_id": 102,
-        "title": "Suspicious login URL review",
-        "severity": "medium",
-        "status": "investigating",
-        "sender": "Security Notice <alerts@example-support.com>",
-        "subject": "Review recent account activity",
-        "risk_score": 52,
-        "classification": "MEDIUM",
-        "evidence_level": "MODERATE",
-        "assigned_to": "soc-analyst@example.com",
-        "created_at": "2026-09-02T10:15:00Z",
-        "updated_at": "2026-09-02T10:40:00Z",
-    },
-]
+# ── Pydantic Request Models ───────────────────────────────────────────
+class IncidentUpdatePayload(BaseModel):
+    status: str
+    assigned_to: str | None = None
+    notes: str | None = None
 
 
+class DirectEmailInput(BaseModel):
+    from_email: str | None = None
+    to_email: str | None = None
+    subject: str | None = None
+    body: str | None = None
+    raw_headers: str | None = None
+    raw_eml_text: str | None = None
+
+
+# ── Helper Formatter ──────────────────────────────────────────────────
+def format_email_entry_for_frontend(email: AnalyzedEmail) -> dict[str, Any]:
+    """
+    Formats a database AnalyzedEmail model (along with any associated Incident)
+    into the schema consumed by SOCIncidentQueue and SOCDetailDrawer.
+    """
+    res = (email.analysis_result or {})
+    inc = email.incidents[0] if email.incidents else None
+
+    reasons = res.get("reasons", [])
+    if inc and inc.summary:
+        explanation = inc.summary
+    elif reasons:
+        explanation = " ".join(str(r) for r in reasons[:3])
+    else:
+        explanation = "Standard benign email. No elevated threat patterns detected."
+
+    spf = res.get("spf", "none")
+    dkim = res.get("dkim", "none")
+    dmarc = res.get("dmarc", "none")
+    auth_status = {
+        "SPF": spf,
+        "DKIM": dkim,
+        "DMARC": dmarc,
+    }
+
+    threat_intel = list(res.get("threat_intel") or [])
+    if not threat_intel:
+        if res.get("domain_lookalike") and email.sender:
+            threat_intel.append({"type": "Domain", "value": email.sender, "source": "Domain Threat Intel"})
+        if res.get("primary_ip") and res.get("ip_risk_score", 0) >= 40:
+            threat_intel.append({"type": "IP", "value": res.get("primary_ip", ""), "source": "IP Abuse Check"})
+        for u in res.get("urls", []):
+            if isinstance(u, dict) and u.get("classification") in ("SUSPICIOUS", "MALICIOUS"):
+                threat_intel.append({
+                    "type": "URL",
+                    "value": str(u.get("original_url", ""))[:45],
+                    "source": "URL Phish Engine",
+                })
+
+    status_map = {
+        IncidentStatus.NEW: "New",
+        IncidentStatus.OPEN: "Open",
+        IncidentStatus.INVESTIGATING: "Investigating",
+        IncidentStatus.ESCALATED: "Escalated",
+        IncidentStatus.RESOLVED: "Resolved",
+        IncidentStatus.FALSE_POSITIVE: "False Positive",
+        IncidentStatus.CLOSED: "Closed",
+    }
+
+    if inc:
+        status_display = status_map.get(inc.status, inc.status.value.capitalize())
+        raw_status = inc.status.value
+        entry_id = f"INC-{inc.id:04d}"
+        numeric_id = inc.id
+    else:
+        status_display = "Clean"
+        raw_status = "clean"
+        entry_id = f"EML-{email.id:04d}"
+        numeric_id = email.id
+
+    return {
+        "id": entry_id,
+        "numeric_id": numeric_id,
+        "email_id": email.id,
+        "has_incident": bool(inc),
+        "incident_id": inc.id if inc else None,
+        "date": email.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+        "sender": email.sender or "Unknown",
+        "subject": (email.subject or "No Subject") or "No Subject",
+        "severity": email.classification.upper(),
+        "status": status_display,
+        "raw_status": raw_status,
+        "riskScore": email.risk_score,
+        "explanation": explanation,
+        "authStatus": auth_status,
+        "threatIntel": threat_intel,
+        "assigned_to": inc.assigned_to if inc else None,
+        "notes": inc.notes if inc else None,
+        "filename": email.filename,
+        "body_preview": (email.body[:400] if email.body else ""),
+        "analysis_result": res,
+    }
+
+
+def execute_analysis_pipeline(parsed: dict, filename: str, db: Session) -> dict[str, Any]:
+    """
+    Shared execution engine that runs headers, NLP, URLs, IP, and risk computation,
+    persisting results to the database and raising an incident if required.
+    """
+    header_res = analyze_headers(parsed)
+    nlp_input = "\n\n".join(
+        part for part in (parsed.get("subject", ""), parsed.get("body", "")) if part
+    )
+    nlp_res = classify_nlp(nlp_input)
+    url_res = analyze_urls(parsed)
+    ip_res = analyze_ip(parsed.get("received_chain", []))
+    final_verdict = compute_risk(header_res, nlp_res, ip_res, url_res)
+
+    response_payload = {
+        "from": parsed.get("from", ""),
+        "to": parsed.get("to", ""),
+        "subject": parsed.get("subject", ""),
+        "body": parsed.get("body", ""),
+        "received_chain": parsed.get("received_chain", []),
+        **header_res,
+        **ip_res,
+        **nlp_res,
+        **url_res,
+        **final_verdict,
+    }
+
+    # Persist to database
+    analyzed_email = AnalyzedEmail(
+        filename=filename,
+        sender=parsed.get("from", "") or "Unknown Sender",
+        recipient=parsed.get("to", ""),
+        subject=parsed.get("subject", "") or "No Subject",
+        body=parsed.get("body", ""),
+        risk_score=final_verdict.get("risk_score", 0),
+        classification=final_verdict.get("classification", "LOW"),
+        evidence_level=final_verdict.get("evidence_level", "LOW"),
+        phishing_probability=nlp_res.get("phishing_probability", 0),
+        header_risk_score=header_res.get("header_risk_score", 0),
+        ip_risk_score=ip_res.get("ip_risk_score", 0),
+        url_risk_score=url_res.get("url_risk_score", 0),
+        raw_headers=parsed.get("raw_headers", {}),
+        received_chain=parsed.get("received_chain", []),
+        analysis_result=response_payload,
+        risk_metrics=final_verdict.get("risk_metrics", {}),
+        created_at=utcnow(),
+    )
+    db.add(analyzed_email)
+    db.commit()
+    db.refresh(analyzed_email)
+
+    # Dynamic Incident generation for threats
+    incident_id = None
+    risk_score = final_verdict.get("risk_score", 0)
+    classification = final_verdict.get("classification", "LOW").upper()
+
+    if risk_score >= 30 or classification in ("CRITICAL", "HIGH", "MEDIUM"):
+        reasons = final_verdict.get("reasons", [])
+        primary_reason = reasons[0] if reasons else "Elevated email threat indicators detected"
+        incident = Incident(
+            analyzed_email_id=analyzed_email.id,
+            title=f"{classification} Threat: {(analyzed_email.subject or 'No Subject')[:75]}",
+            severity=classification,
+            status=IncidentStatus.NEW,
+            summary=primary_reason,
+            notes=f"Generated from threat analysis. Risk Score: {risk_score}/100.",
+            created_at=utcnow(),
+            updated_at=utcnow(),
+        )
+        db.add(incident)
+        db.commit()
+        db.refresh(incident)
+        incident_id = incident.id
+
+    response_payload["analyzed_email_id"] = analyzed_email.id
+    response_payload["incident_id"] = incident_id
+    return response_payload
+
+
+# ── Health Check ──────────────────────────────────────────────────────
 @app.get("/")
 def root():
-    """Health check endpoint."""
-    return {"message": "AI Email Threat Detector API is running"}
+    return {"message": "AI Email Threat Detector API is running", "status": "healthy"}
 
 
-@app.get("/api/incidents")
-def list_incidents():
-    """Temporary SOC incident list stub; does not query persistence yet."""
-    return {
-        "items": FAKE_INCIDENTS,
-        "total": len(FAKE_INCIDENTS),
-    }
-
-
-@app.get("/api/incidents/{incident_id}")
-def get_incident(incident_id: int):
-    """Temporary SOC incident detail stub; does not query persistence yet."""
-    for incident in FAKE_INCIDENTS:
-        if incident["id"] == incident_id:
-            return {
-                **incident,
-                "summary": "Mock incident detail for SOC workflow integration.",
-                "reasons": [
-                    "SPF authentication failed",
-                    "Sender/Reply-To mismatch detected",
-                    "Strong phishing-language evidence",
-                ],
-                "timeline": [
-                    {
-                        "timestamp": incident["created_at"],
-                        "event": "Incident created from analysis result",
-                    },
-                    {
-                        "timestamp": incident["updated_at"],
-                        "event": f"Status is {incident['status']}",
-                    },
-                ],
-            }
-
-    raise HTTPException(status_code=404, detail="Incident not found")
-
-
-@app.get("/api/stats/summary")
-def get_stats_summary():
-    """Temporary SOC summary stats stub; does not calculate from persistence yet."""
-    return {
-        "total_analyzed_emails": 128,
-        "total_incidents": len(FAKE_INCIDENTS),
-        "open_incidents": 2,
-        "critical_incidents": 1,
-        "high_risk_emails": 14,
-        "average_risk_score": 37,
-    }
-
-
-@app.get("/api/stats/incidents")
-def get_incident_stats():
-    """Temporary incident distribution stats stub; does not query persistence yet."""
-    return {
-        "by_status": {
-            "new": 1,
-            "open": 0,
-            "investigating": 1,
-            "escalated": 0,
-            "resolved": 0,
-            "false_positive": 0,
-            "closed": 0,
-        },
-        "by_severity": {
-            "low": 0,
-            "medium": 1,
-            "high": 0,
-            "critical": 1,
-        },
-        "recent_incidents": FAKE_INCIDENTS,
-    }
-
-
+# ── 1. Analyze Email from File Upload (.eml) ─────────────────────────
 @app.post("/api/analyze")
-async def analyze_email(file: UploadFile = File(...)):
+async def analyze_email(file: UploadFile = File(...), db: Session = Depends(get_db)):
     """
-    Accepts a .eml file upload, runs the live multi-stage analysis pipeline,
-    and returns a unified flat JSON payload.
+    Accepts an uploaded .eml file, runs the multi-stage threat detection pipeline,
+    persists the results, and creates a dynamic incident if risky.
     """
-    # 1. Validate file extension
     if not file.filename.lower().endswith(".eml"):
-        raise HTTPException(
-            status_code=400,
-            detail="Only .eml files are supported."
-        )
+        raise HTTPException(status_code=400, detail="Only .eml files are supported.")
 
-    # 2. Read file contents
     file_bytes = await file.read()
     if not file_bytes:
-        raise HTTPException(
-            status_code=400,
-            detail="The uploaded file is empty."
-        )
+        raise HTTPException(status_code=400, detail="The uploaded file is empty.")
 
     try:
-        # Stage 1: Parse raw .eml into structured fields
         parsed = parse_email(file_bytes)
-
-        # Stage 2: Header & Authentication Analysis
-        header_res = analyze_headers(parsed)
-
-        # Stage 3: NLP Content Phishing Classification
-        nlp_input = "\n\n".join(
-            part for part in (parsed.get("subject", ""), parsed.get("body", "")) if part
-        )
-        nlp_res = classify_nlp(nlp_input)
-
-        # Stage 4: URL Phishing Analysis
-        url_res = analyze_urls(parsed)
-
-        # Stage 5: IP Geolocation & Network Reputation
-        ip_res = analyze_ip(parsed.get("received_chain", []))
-
-        # Stage 6: Composite Risk Calculation
-        final_verdict = compute_risk(header_res, nlp_res, ip_res, url_res)
-
-        # ── Flatten response into unified JSON ─────────────────────────
-        return {
-            # Email metadata & content
-            "from": parsed.get("from", ""),
-            "to": parsed.get("to", ""),
-            "subject": parsed.get("subject", ""),
-            "body": parsed.get("body", ""),
-            "received_chain": parsed.get("received_chain", []),
-
-            # Header analysis results
-            **header_res,
-
-            # IP intelligence results
-            **ip_res,
-
-            # NLP model results
-            **nlp_res,
-
-            # URL analysis results
-            **url_res,
-
-            # Risk Engine final verdict
-            **final_verdict,
-        }
-
+        return execute_analysis_pipeline(parsed, file.filename, db)
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(
             status_code=500,
             detail=f"An error occurred while analyzing the email: {str(e)}"
         )
+
+
+# ── 2. Dynamic Input Analysis (Direct Text / Pasted Email) ───────────
+@app.post("/api/analyze-text")
+def analyze_direct_input(input_data: DirectEmailInput, db: Session = Depends(get_db)):
+    """
+    Accepts dynamic raw text input (raw email or separate From/Subject/Body/Headers fields),
+    processes it through the complete detection pipeline, and persists real analysis records.
+    """
+    try:
+        # If user pasted raw .eml RFC-822 text
+        if input_data.raw_eml_text and input_data.raw_eml_text.strip():
+            raw_bytes = input_data.raw_eml_text.encode("utf-8", errors="replace")
+            parsed = parse_email(raw_bytes)
+            filename = "pasted_raw_email.eml"
+        else:
+            # Structured fields entered dynamically by user
+            raw_headers_dict = {}
+            if input_data.raw_headers:
+                for line in input_data.raw_headers.splitlines():
+                    if ":" in line:
+                        k, v = line.split(":", 1)
+                        raw_headers_dict[k.strip()] = v.strip()
+
+            parsed = {
+                "from": input_data.from_email or "",
+                "to": input_data.to_email or "",
+                "subject": input_data.subject or "",
+                "reply_to": input_data.from_email or "",
+                "return_path": input_data.from_email or "",
+                "message_id": "",
+                "body": input_data.body or "",
+                "raw_html": input_data.body if "<html" in (input_data.body or "").lower() else "",
+                "raw_headers": raw_headers_dict,
+                "received_chain": [],
+            }
+            filename = f"direct_scan_{int(utcnow().timestamp())}.eml"
+
+        if not parsed.get("body") and not parsed.get("subject"):
+            raise HTTPException(status_code=400, detail="Please provide email subject or body text to analyze.")
+
+        return execute_analysis_pipeline(parsed, filename, db)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error analyzing input text: {str(e)}"
+        )
+
+
+# ── SOC Incidents Queue ───────────────────────────────────────────────
+@app.get("/api/incidents")
+def list_incidents(
+    severity: str | None = Query(None),
+    status: str | None = Query(None),
+    search: str | None = Query(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Returns all dynamically analyzed emails from the database, newest first.
+    Includes active threat incidents as well as verified clean emails.
+    """
+    query = db.query(AnalyzedEmail).order_by(desc(AnalyzedEmail.created_at))
+
+    if severity and severity.upper() != "ALL":
+        query = query.filter(AnalyzedEmail.classification == severity.upper())
+
+    emails = query.all()
+    formatted = [format_email_entry_for_frontend(email) for email in emails]
+
+    if status and status.upper() != "ALL":
+        target_status = status.lower().replace(" ", "_")
+        formatted = [e for e in formatted if e["raw_status"] == target_status]
+
+    if search:
+        s = search.lower()
+        formatted = [
+            e for e in formatted
+            if s in e["subject"].lower()
+            or s in e["sender"].lower()
+            or s in e["id"].lower()
+            or s in e["explanation"].lower()
+        ]
+
+    return {
+        "items": formatted,
+        "total": len(formatted),
+    }
+
+
+@app.get("/api/incidents/{item_id}")
+def get_incident(item_id: int, db: Session = Depends(get_db)):
+    """
+    Returns full detail for an analyzed email or incident.
+    """
+    # 1. Try finding an Incident
+    incident = db.query(Incident).filter(Incident.id == item_id).first()
+    if incident and incident.analyzed_email:
+        return format_email_entry_for_frontend(incident.analyzed_email)
+
+    # 2. Try finding by AnalyzedEmail ID
+    email = db.query(AnalyzedEmail).filter(AnalyzedEmail.id == item_id).first()
+    if email:
+        return format_email_entry_for_frontend(email)
+
+    raise HTTPException(status_code=404, detail="Analyzed email or incident not found")
+
+
+@app.patch("/api/incidents/{item_id}")
+def update_incident(
+    item_id: int,
+    payload: IncidentUpdatePayload,
+    db: Session = Depends(get_db)
+):
+    """
+    Allows SOC analysts to triage any email or incident in the queue:
+    - Escalate to Tier 2
+    - Mark as False Positive
+    - Set to Investigating / Closed / Resolved
+    """
+    incident = db.query(Incident).filter(Incident.id == item_id).first()
+    if not incident:
+        # Check if item_id refers to an AnalyzedEmail that doesn't have an incident yet
+        email = db.query(AnalyzedEmail).filter(AnalyzedEmail.id == item_id).first()
+        if not email:
+            raise HTTPException(status_code=404, detail="Incident or analyzed email not found")
+
+        # Create an incident on-demand for this email
+        incident = Incident(
+            analyzed_email_id=email.id,
+            title=f"Manual Triage: {(email.subject or 'No Subject')[:75]}",
+            severity=email.classification.upper(),
+            status=IncidentStatus.INVESTIGATING,
+            summary="Manually flagged by analyst for triage.",
+            created_at=utcnow(),
+            updated_at=utcnow(),
+        )
+        db.add(incident)
+        db.commit()
+        db.refresh(incident)
+
+    new_status_str = payload.status.lower().strip().replace(" ", "_")
+
+    valid_statuses = {item.value: item for item in IncidentStatus}
+    if new_status_str not in valid_statuses:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid status '{payload.status}'. Valid values: {list(valid_statuses.keys())}"
+        )
+
+    incident.status = valid_statuses[new_status_str]
+    incident.updated_at = utcnow()
+
+    if payload.assigned_to:
+        incident.assigned_to = payload.assigned_to
+    if payload.notes:
+        incident.notes = payload.notes
+
+    if incident.status in (IncidentStatus.CLOSED, IncidentStatus.FALSE_POSITIVE, IncidentStatus.RESOLVED):
+        incident.closed_at = utcnow()
+
+    db.commit()
+    db.refresh(incident)
+
+    return {
+        "success": True,
+        "incident": format_email_entry_for_frontend(incident.analyzed_email)
+    }
+
+
+# ── SOC Summary Statistics (100% Dynamic) ─────────────────────────────
+@app.get("/api/stats/summary")
+def get_stats_summary(db: Session = Depends(get_db)):
+    """
+    Calculates dynamic SOC dashboard statistics directly from database records.
+    Contains zero hardcoded values.
+    """
+    total_emails = db.query(AnalyzedEmail).count()
+    active_incidents = db.query(Incident).filter(
+        Incident.status.in_([
+            IncidentStatus.NEW,
+            IncidentStatus.OPEN,
+            IncidentStatus.INVESTIGATING,
+            IncidentStatus.ESCALATED,
+        ])
+    ).count()
+
+    threat_count = db.query(AnalyzedEmail).filter(
+        AnalyzedEmail.classification.in_(["HIGH", "CRITICAL"])
+    ).count()
+    threat_rate = f"{(threat_count / total_emails * 100):.1f}%" if total_emails > 0 else "0.0%"
+
+    # Dynamic average resolution calculation from resolved/closed incidents
+    closed_incidents = db.query(Incident).filter(
+        Incident.closed_at.isnot(None),
+        Incident.status.in_([IncidentStatus.CLOSED, IncidentStatus.RESOLVED, IncidentStatus.FALSE_POSITIVE])
+    ).all()
+
+    if closed_incidents:
+        total_minutes = sum(
+            max(1, int((inc.closed_at - inc.created_at).total_seconds() / 60))
+            for inc in closed_incidents
+        )
+        avg_m = int(total_minutes / len(closed_incidents))
+        avg_resolution = f"{avg_m}m" if avg_m < 60 else f"{avg_m // 60}h {avg_m % 60}m"
+    else:
+        avg_resolution = "N/A"
+
+    return {
+        "active_incidents": active_incidents,
+        "avg_resolution": avg_resolution,
+        "emails_scanned": total_emails,
+        "threat_rate": threat_rate,
+        "total_incidents": db.query(Incident).count(),
+    }
+
+
+# ── SOC Charts Statistics (100% Dynamic) ──────────────────────────────
+@app.get("/api/stats/charts")
+def get_stats_charts(db: Session = Depends(get_db)):
+    """
+    Returns 100% dynamic 7-day verdicts and aggregated threat terms strictly
+    from analyzed email records in the database.
+    """
+    now = utcnow()
+    day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+    # Dynamic 7-day buckets
+    verdicts = []
+    for i in range(6, -1, -1):
+        target_date = (now - timedelta(days=i)).date()
+        day_label = day_names[target_date.weekday()]
+
+        start_dt = datetime(target_date.year, target_date.month, target_date.day)
+        end_dt = start_dt + timedelta(days=1)
+
+        day_emails = db.query(AnalyzedEmail).filter(
+            AnalyzedEmail.created_at >= start_dt,
+            AnalyzedEmail.created_at < end_dt,
+        ).all()
+
+        malicious = sum(1 for e in day_emails if e.risk_score >= 60)
+        clean = sum(1 for e in day_emails if e.risk_score < 60)
+        verdicts.append({"name": day_label, "malicious": malicious, "clean": clean})
+
+    # Dynamic extraction of top flagged threat terms
+    all_emails = db.query(AnalyzedEmail).all()
+    term_counts: dict[str, int] = {}
+    for email in all_emails:
+        res = email.analysis_result or {}
+        terms = res.get("flagged_terms") or []
+        for t in terms:
+            cleaned = str(t).title()
+            term_counts[cleaned] = term_counts.get(cleaned, 0) + 1
+
+    palette = ["#6366f1", "#ef4444", "#f97316", "#eab308", "#22d3ee"]
+    sorted_terms = sorted(term_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+    terms_data = [
+        {"name": term, "count": count, "fill": palette[idx % len(palette)]}
+        for idx, (term, count) in enumerate(sorted_terms)
+    ]
+
+    return {
+        "verdicts_over_time": verdicts,
+        "top_terms": terms_data,
+    }
