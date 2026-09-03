@@ -12,6 +12,11 @@ from typing import Any
 import urllib.request
 import json
 from functools import lru_cache
+import os
+import requests
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Broad candidate matcher; ipaddress performs final IPv4/IPv6 validation.
 IP_CANDIDATE_PATTERN = re.compile(
@@ -114,13 +119,88 @@ def lookup_geo(ip: str) -> dict[str, str]:
 
     return default_unknown
 
+def lookup_ip_reputation(ip: str) -> dict[str, Any]:
+    """
+    Look up an IP address using AbuseIPDB.
 
-def calculate_ip_risk(geo: dict[str, str], ip: str) -> int:
+    Returns a safe fallback if:
+    - the API key is missing
+    - the API request fails
+    - the request times out
+    """
+
+    if not ip:
+        return {
+            "abuse_confidence_score": 0,
+            "reputation_available": False
+        }
+
+    api_key = os.getenv("ABUSEIPDB_API_KEY")
+
+    if not api_key:
+        return {
+            "abuse_confidence_score": 0,
+            "reputation_available": False
+        }
+
+    try:
+        response = requests.get(
+            "https://api.abuseipdb.com/api/v2/check",
+            headers={
+                "Key": api_key,
+                "Accept": "application/json"
+            },
+            params={
+                "ipAddress": ip,
+                "maxAgeInDays": 90
+            },
+            timeout=2
+        )
+
+        if response.status_code != 200:
+            return {
+                "abuse_confidence_score": 0,
+                "reputation_available": False
+            }
+
+        data = response.json().get("data", {})
+
+        return {
+            "abuse_confidence_score": int(
+                data.get("abuseConfidenceScore", 0)
+            ),
+            "reputation_available": True
+        }
+
+    except Exception:
+        return {
+            "abuse_confidence_score": 0,
+            "reputation_available": False
+        }
+
+def calculate_ip_risk(
+    geo: dict[str, str],
+    ip: str,
+    reputation: dict[str, Any]
+) -> int:
     """
     Calculates an IP risk score (0-100) based on ISP reputation and hosting signals.
     """
     if not ip:
         return 0
+    if reputation.get("reputation_available"):
+        return max(
+            0,
+            min(
+                100,
+                int(
+                    reputation.get(
+                        "abuse_confidence_score",
+                        0
+                    )
+                )
+            )
+        )
 
     isp_lower = str(geo.get("isp", "")).lower()
 
@@ -145,19 +225,29 @@ def analyze(received_chain: list[str]) -> dict[str, Any]:
     """
     Analyzes the Received chain and returns the exact IPResult shape.
     """
+
     extracted_ips = extract_public_ips(received_chain)
 
     primary_ip = extracted_ips[0] if extracted_ips else ""
 
     if primary_ip:
         geo = lookup_geo(primary_ip)
-        ip_risk_score = calculate_ip_risk(geo, primary_ip)
+
+        reputation = lookup_ip_reputation(primary_ip)
+
+        ip_risk_score = calculate_ip_risk(
+            geo,
+            primary_ip,
+            reputation
+        )
+
     else:
         geo = {
             "country": "Unknown",
             "city": "Unknown",
             "isp": "Unknown",
         }
+
         ip_risk_score = 0
 
     return {
@@ -166,7 +256,6 @@ def analyze(received_chain: list[str]) -> dict[str, Any]:
         "geo": geo,
         "ip_risk_score": ip_risk_score,
     }
-
 
 if __name__ == "__main__":
     test_chain = [
