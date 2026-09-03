@@ -1,0 +1,7 @@
+# Dependencies for offline model fine-tuning and dataset creation
+# (ml/dataset_builder.py, ml/train_llm.py, ml/push_to_hub.py)
+pandas
+datasets
+evaluate
+accelerate
+huggingface_hub
