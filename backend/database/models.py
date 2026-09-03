@@ -6,8 +6,13 @@ backend/main.py's execute_analysis_pipeline() to store analyzed emails,
 incident tracking records, and triage history for the SOC queue.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
+
+
+def _utcnow() -> datetime:
+    """Return current UTC time as a timezone-naive datetime (SQLite-compatible)."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy import Enum as SQLEnum
@@ -23,7 +28,7 @@ except ImportError:
 class IncidentStatus(str, Enum):
     NEW = "new"
     OPEN = "open"
-    INVESTIGATING = "investigating"
+    IN_REVIEW = "in_review"
     ESCALATED = "escalated"
     RESOLVED = "resolved"
     FALSE_POSITIVE = "false_positive"
@@ -57,7 +62,7 @@ class AnalyzedEmail(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
-        default=datetime.utcnow,
+        default=_utcnow,
         index=True,
     )
 
@@ -92,14 +97,14 @@ class Incident(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
-        default=datetime.utcnow,
+        default=_utcnow,
         index=True,
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=_utcnow,
+        onupdate=_utcnow,
     )
     closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 

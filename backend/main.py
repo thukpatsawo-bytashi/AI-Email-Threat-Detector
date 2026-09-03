@@ -129,7 +129,7 @@ def format_email_entry_for_frontend(email: AnalyzedEmail) -> dict[str, Any]:
     status_map = {
         IncidentStatus.NEW: "New",
         IncidentStatus.OPEN: "Open",
-        IncidentStatus.INVESTIGATING: "Investigating",
+        IncidentStatus.IN_REVIEW: "In Review",
         IncidentStatus.ESCALATED: "Escalated",
         IncidentStatus.RESOLVED: "Resolved",
         IncidentStatus.FALSE_POSITIVE: "False Positive",
@@ -278,7 +278,7 @@ async def analyze_email(file: UploadFile = File(...), db: Session = Depends(get_
     Accepts an uploaded .eml file, runs the multi-stage threat detection pipeline,
     persists the results, and creates a dynamic incident if risky.
     """
-    if not file.filename.lower().endswith(".eml"):
+    if not (file.filename or "").lower().endswith(".eml"):
         raise HTTPException(status_code=400, detail="Only .eml files are supported.")
 
     file_bytes = await file.read()
@@ -287,7 +287,8 @@ async def analyze_email(file: UploadFile = File(...), db: Session = Depends(get_
 
     try:
         parsed = parse_email(file_bytes)
-        return execute_analysis_pipeline(parsed, file.filename, db)
+        safe_filename: str = file.filename or "unknown.eml"
+        return execute_analysis_pipeline(parsed, safe_filename, db)
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(
@@ -429,7 +430,7 @@ def update_incident(
             analyzed_email_id=email.id,
             title=f"Manual Triage: {(email.subject or 'No Subject')[:75]}",
             severity=email.classification.upper(),
-            status=IncidentStatus.INVESTIGATING,
+            status=IncidentStatus.IN_REVIEW,
             summary="Manually flagged by analyst for triage.",
             created_at=utcnow(),
             updated_at=utcnow(),
@@ -479,7 +480,7 @@ def get_stats_summary(db: Session = Depends(get_db)):
         Incident.status.in_([
             IncidentStatus.NEW,
             IncidentStatus.OPEN,
-            IncidentStatus.INVESTIGATING,
+            IncidentStatus.IN_REVIEW,
             IncidentStatus.ESCALATED,
         ])
     ).count()
@@ -497,8 +498,9 @@ def get_stats_summary(db: Session = Depends(get_db)):
 
     if closed_incidents:
         total_minutes = sum(
-            max(1, int((inc.closed_at - inc.created_at).total_seconds() / 60))
+            max(1, int((inc.closed_at - inc.created_at).total_seconds() / 60))  # type: ignore[operator]
             for inc in closed_incidents
+            if inc.closed_at is not None
         )
         avg_m = int(total_minutes / len(closed_incidents))
         avg_resolution = f"{avg_m}m" if avg_m < 60 else f"{avg_m // 60}h {avg_m % 60}m"
@@ -514,9 +516,9 @@ def get_stats_summary(db: Session = Depends(get_db)):
     }
 
 
-# ── SOC Charts Statistics (100% Dynamic) ──────────────────────────────
-@app.get("/api/stats/charts")
-def get_stats_charts(db: Session = Depends(get_db)):
+# ── SOC Trends Statistics (100% Dynamic) ──────────────────────────────
+@app.get("/api/stats/trends")
+def get_stats_trends(db: Session = Depends(get_db)):
     """
     Returns 100% dynamic 7-day verdicts and aggregated threat terms strictly
     from analyzed email records in the database.
