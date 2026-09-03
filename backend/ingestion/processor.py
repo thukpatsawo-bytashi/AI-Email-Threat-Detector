@@ -25,7 +25,7 @@ load_dotenv(ENV_PATH)
 
 ANALYZE_API_URL = os.getenv(
     "ANALYZE_API_URL",
-    "http://127.0.0.1:8000/api/analyze"
+    "http://127.0.0.1:8000/api/analyze-text"
 )
 
 
@@ -33,6 +33,35 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
+
+
+def _build_analyze_payload(parsed_email):
+    """
+    Map the dict returned by ``parse_email()`` onto the
+    ``DirectEmailInput`` JSON schema accepted by
+    ``POST /api/analyze-text``.
+    """
+    raw_hdrs = parsed_email.get("raw_headers")
+    if isinstance(raw_hdrs, dict):
+        raw_headers_str = "\n".join(
+            f"{k}: {v}" for k, v in raw_hdrs.items()
+        )
+    elif isinstance(raw_hdrs, str):
+        raw_headers_str = raw_hdrs
+    else:
+        raw_headers_str = None
+
+    return {
+        "from_email": parsed_email.get("from_email") or parsed_email.get("from") or "",
+        "to_email": parsed_email.get("to_email") or parsed_email.get("to") or "",
+        "subject": parsed_email.get("subject", "") or "",
+        "body": parsed_email.get("body", "") or "",
+        "raw_headers": raw_headers_str,
+        "raw_eml_text": parsed_email.get("raw_eml_text"),
+    }
+
+
+build_analyze_payload = _build_analyze_payload
 
 
 def analyze_email(parsed_email):
@@ -45,9 +74,11 @@ def analyze_email(parsed_email):
     The analysis/risk engine is responsible for that.
     """
 
+    payload = _build_analyze_payload(parsed_email)
+
     response = requests.post(
         ANALYZE_API_URL,
-        json=parsed_email,
+        json=payload,
         timeout=60
     )
 
@@ -59,7 +90,9 @@ def analyze_email(parsed_email):
 def process_emails():
     """
     Fetch new emails, parse them, send them to the analysis
-    API, and trigger alerts based on the returned verdict.
+    API, and update the last processed UID. The backend analysis
+    pipeline handles risk computation, database persistence,
+    incident creation, and threat alerting.
     """
 
     last_uid = load_last_uid()
@@ -120,43 +153,28 @@ def process_emails():
             )
 
             # ----------------------------------------
-            # Get verdict from analysis pipeline
+            # Log verdict from analysis pipeline
             #
-            # We do NOT calculate the risk here.
+            # The backend analysis pipeline automatically handles
+            # persistence, incident creation, and alerting for
+            # elevated threats (HIGH / CRITICAL).
             # ----------------------------------------
 
-            severity = str(
+            classification = str(
                 result.get(
-                    "severity",
-                    result.get("risk", "")
+                    "classification",
+                    "UNKNOWN"
                 )
             ).upper()
 
+            risk_score = result.get("risk_score", 0)
+
             logging.info(
-                "UID %d verdict: %s",
+                "UID %d verdict: %s (risk_score=%s)",
                 uid,
-                severity
+                classification,
+                risk_score
             )
-
-            # ----------------------------------------
-            # Alerting
-            # ----------------------------------------
-
-            if severity in {
-                "HIGH",
-                "CRITICAL"
-            }:
-
-                from backend.alerts.webhook import send_alert
-
-                send_alert(
-                    severity=severity,
-                    subject=parsed_email.get(
-                        "subject",
-                        "(No subject)"
-                    ),
-                    details=result
-                )
 
             # ----------------------------------------
             # Only mark this email processed after
@@ -197,6 +215,9 @@ def process_emails():
     logging.info(
         "Processing cycle complete."
     )
+
+
+process_new_emails = process_emails
 
 
 if __name__ == "__main__":
