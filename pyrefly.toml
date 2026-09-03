@@ -1,9 +1,7 @@
 # Pyrefly configuration for AI Email Threat Detector
 
-python_interpreter = "/Users/nehashanavas/Code/SIH/backend/venv/bin/python3"
-
 # Add backend so local packages resolve (database, analyzers, ml, alerts)
-search_path = ["/Users/nehashanavas/Code/SIH/backend"]
+search_path = ["backend"]
 
 # Exclude venv, build artifacts, and brain/scratch files from analysis
 project_excludes = [

@@ -130,6 +130,7 @@ def format_email_entry_for_frontend(email: AnalyzedEmail) -> dict[str, Any]:
         IncidentStatus.NEW: "New",
         IncidentStatus.OPEN: "Open",
         IncidentStatus.IN_REVIEW: "In Review",
+        IncidentStatus.INVESTIGATING: "Investigating",
         IncidentStatus.ESCALATED: "Escalated",
         IncidentStatus.RESOLVED: "Resolved",
         IncidentStatus.FALSE_POSITIVE: "False Positive",
@@ -481,6 +482,7 @@ def get_stats_summary(db: Session = Depends(get_db)):
             IncidentStatus.NEW,
             IncidentStatus.OPEN,
             IncidentStatus.IN_REVIEW,
+            IncidentStatus.INVESTIGATING,
             IncidentStatus.ESCALATED,
         ])
     ).count()
@@ -516,9 +518,10 @@ def get_stats_summary(db: Session = Depends(get_db)):
     }
 
 
-# ── SOC Trends Statistics (100% Dynamic) ──────────────────────────────
+# ── SOC Charts & Trends Statistics (100% Dynamic) ─────────────────────
+@app.get("/api/stats/charts")
 @app.get("/api/stats/trends")
-def get_stats_trends(db: Session = Depends(get_db)):
+def get_stats_charts(db: Session = Depends(get_db)):
     """
     Returns 100% dynamic 7-day verdicts and aggregated threat terms strictly
     from analyzed email records in the database.

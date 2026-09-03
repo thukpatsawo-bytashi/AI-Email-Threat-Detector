@@ -433,3 +433,80 @@ class TestSuspiciousPort:
         result = analyze_single_url("https://example.com:443/page")
         signals = [d["signal"] for d in result["detections"]]
         assert "suspicious_port" not in signals
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  VirusTotal Reputation
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestVirusTotal:
+    def test_virustotal_missing_api_key(self, monkeypatch):
+        from analyzers.url_analyzer import lookup_url_virustotal
+        monkeypatch.delenv("VIRUSTOTAL_API_KEY", raising=False)
+        res = lookup_url_virustotal("https://example.com")
+        assert res["available"] is False
+        assert "not configured" in res["message"]
+
+    def test_virustotal_mock_success(self, monkeypatch):
+        from unittest.mock import MagicMock, patch
+        from analyzers.url_analyzer import lookup_url_virustotal
+
+        monkeypatch.setenv("VIRUSTOTAL_API_KEY", "dummy_vt_key")
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "data": {
+                "attributes": {
+                    "last_analysis_stats": {
+                        "malicious": 5,
+                        "suspicious": 1,
+                        "harmless": 65,
+                    }
+                }
+            }
+        }
+        with patch("analyzers.url_analyzer.requests.get", return_value=mock_resp):
+            res = lookup_url_virustotal("https://malicious-site.xyz/login")
+            assert res["available"] is True
+            assert res["malicious"] == 5
+            assert res["suspicious"] == 1
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Credential Collection Page Scan
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestCredentialPageScan:
+    def test_credential_collection_detected(self):
+        from unittest.mock import MagicMock, patch
+        from analyzers.url_analyzer import scan_page_for_credential_collection
+
+        mock_resp = MagicMock()
+        mock_resp.headers = {"Content-Type": "text/html; charset=utf-8"}
+        mock_resp.text = """
+        <html>
+          <body>
+            <form action="/login">
+              <input type="text" name="username" placeholder="Enter username" />
+              <input type="password" name="password" placeholder="Enter password" />
+              <button type="submit">Log in</button>
+            </form>
+          </body>
+        </html>
+        """
+        with patch("analyzers.url_analyzer.requests.get", return_value=mock_resp):
+            res = scan_page_for_credential_collection("http://suspicious-login.org")
+            assert res["detected"] is True
+            assert "password" in res["matches"]
+
+    def test_credential_collection_clean(self):
+        from unittest.mock import MagicMock, patch
+        from analyzers.url_analyzer import scan_page_for_credential_collection
+
+        mock_resp = MagicMock()
+        mock_resp.headers = {"Content-Type": "text/html"}
+        mock_resp.text = "<html><body><h1>Welcome to our blog!</h1><p>Articles on tech.</p></body></html>"
+        with patch("analyzers.url_analyzer.requests.get", return_value=mock_resp):
+            res = scan_page_for_credential_collection("http://blog.example.com")
+            assert res["detected"] is False
+
