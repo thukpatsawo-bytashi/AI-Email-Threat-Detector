@@ -1,9 +1,9 @@
 """
-Initial persistence models for analyzed emails and SOC incidents.
+Persistence models for analyzed emails and SOC incidents.
 
-These models are intentionally not wired into /api/analyze yet. They define the
-schema contract for the upcoming persistence phase without changing runtime
-analysis behavior.
+These models are wired into the threat detection pipeline via
+backend/main.py's execute_analysis_pipeline() to store analyzed emails,
+incident tracking records, and triage history for the SOC queue.
 """
 
 from datetime import datetime, timezone

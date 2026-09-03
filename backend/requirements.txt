@@ -8,6 +8,10 @@ tldextract>=5.1.0
 pydantic>=2.6.0
 beautifulsoup4>=4.12.0
 sqlalchemy>=2.0.0
+<<<<<<< HEAD
+=======
+apscheduler>=3.10.0
+>>>>>>> origin/main
 python-dotenv>=1.0.0
 pandas
 torch
