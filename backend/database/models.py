@@ -29,6 +29,7 @@ class IncidentStatus(str, Enum):
     NEW = "new"
     OPEN = "open"
     IN_REVIEW = "in_review"
+    INVESTIGATING = "investigating"
     ESCALATED = "escalated"
     RESOLVED = "resolved"
     FALSE_POSITIVE = "false_positive"

@@ -273,6 +273,7 @@ AI-Email-Threat-Detector/
 │       ├── SOCIncidentQueue.jsx # Incident & analyzed email triage queue
 │       ├── SOCDetailDrawer.jsx  # Deep forensic analysis drawer
 │       └── index.css            # Dark mode design system & styling
+├── requirements.txt             # Pinned Python package dependencies (API, ML, Ingestion, Tests)
 └── docker-compose.yml           # Multi-container orchestration & volume configuration
 ```
 

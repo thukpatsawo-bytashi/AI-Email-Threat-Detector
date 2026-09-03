@@ -10,14 +10,159 @@ to produce per-URL scores and an aggregate risk assessment.
 
 from __future__ import annotations
 
+import base64
 import html as html_module
 import ipaddress
+import json
+import os
+from pathlib import Path
 import re
-from urllib.parse import urlparse, unquote, parse_qs
+from typing import Any
+from urllib.parse import ParseResult, parse_qs, unquote, urlparse
 
 from bs4 import BeautifulSoup
+from dotenv import load_dotenv
 from pydantic import BaseModel, Field
+import requests
 import tldextract
+
+# Load backend/.env regardless of execution context
+ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
+load_dotenv(ENV_PATH)
+load_dotenv()
+
+ENABLE_URL_PAGE_SCAN = os.getenv("ENABLE_URL_PAGE_SCAN", "false").lower() in ("true", "1")
+
+
+def lookup_url_virustotal(url: str) -> dict:
+    """Look up a URL in VirusTotal and return reputation evidence."""
+    api_key = os.getenv("VIRUSTOTAL_API_KEY")
+
+    if not api_key:
+        return {
+            "available": False,
+            "malicious": 0,
+            "suspicious": 0,
+            "harmless": 0,
+            "message": "VirusTotal API key not configured",
+        }
+
+    try:
+        url_id = base64.urlsafe_b64encode(url.encode()).decode().strip("=")
+
+        response = requests.get(
+            f"https://www.virustotal.com/api/v3/urls/{url_id}",
+            headers={"x-apikey": api_key},
+            timeout=2.0,
+        )
+
+        if response.status_code != 200:
+            return {
+                "available": False,
+                "malicious": 0,
+                "suspicious": 0,
+                "harmless": 0,
+                "message": f"VirusTotal HTTP {response.status_code}",
+            }
+
+        data = response.json().get("data", {})
+        stats = data.get("attributes", {}).get("last_analysis_stats", {})
+
+        return {
+            "available": True,
+            "malicious": int(stats.get("malicious", 0)),
+            "suspicious": int(stats.get("suspicious", 0)),
+            "harmless": int(stats.get("harmless", 0)),
+            "message": "VirusTotal lookup successful",
+        }
+
+    except Exception as exc:
+        return {
+            "available": False,
+            "malicious": 0,
+            "suspicious": 0,
+            "harmless": 0,
+            "message": f"VirusTotal lookup failed: {exc}",
+        }
+
+
+def scan_page_for_credential_collection(url: str) -> dict:
+    """
+    Fetch a URL and look for forms/fields that appear to collect
+    sensitive credentials or secrets.
+    """
+    suspicious_terms = [
+        "password",
+        "passwd",
+        "passcode",
+        "social security",
+        "ssn",
+        "seed phrase",
+        "recovery phrase",
+        "private key",
+        "secret phrase",
+    ]
+
+    try:
+        response = requests.get(
+            url,
+            headers={"User-Agent": "Mozilla/5.0 AI-Email-Threat-Detector/1.0"},
+            timeout=2.0,
+            allow_redirects=False,
+        )
+
+        content_type = response.headers.get("Content-Type", "").lower()
+        if "text/html" not in content_type:
+            return {
+                "detected": False,
+                "matches": [],
+                "message": "Response was not HTML",
+            }
+
+        soup = BeautifulSoup(response.text, "html.parser")
+        page_text = soup.get_text(" ", strip=True).lower()
+        matches = []
+
+        for term in suspicious_terms:
+            if term in page_text:
+                matches.append(term)
+
+        def _attr_str(elem: Any, attr_name: str) -> str:
+            val = elem.get(attr_name)
+            if isinstance(val, list):
+                return " ".join(str(v) for v in val)
+            return str(val) if val is not None else ""
+
+        # Inspect form and input element attributes
+        for element in soup.find_all(["form", "input", "textarea", "label"]):
+            element_text = " ".join([
+                _attr_str(element, "name"),
+                _attr_str(element, "id"),
+                _attr_str(element, "placeholder"),
+                _attr_str(element, "aria-label"),
+                element.get_text(" ", strip=True),
+            ]).lower()
+
+            for term in suspicious_terms:
+                if term in element_text and term not in matches:
+                    matches.append(term)
+
+        return {
+            "detected": bool(matches),
+            "matches": matches[:10],
+            "message": (
+                "Sensitive credential-collection indicators detected"
+                if matches
+                else "No credential-collection indicators detected"
+            ),
+        }
+
+    except Exception as exc:
+        return {
+            "detected": False,
+            "matches": [],
+            "message": f"Page scan failed: {exc}",
+        }
 
 
 _TLD_EXTRACT = tldextract.TLDExtract(
@@ -28,7 +173,7 @@ _TLD_EXTRACT = tldextract.TLDExtract(
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  Configurable Brand Database (MVP)
+#  Configurable Brand Database
 # ═══════════════════════════════════════════════════════════════════════════
 
 BRAND_DB: dict[str, dict] = {
@@ -111,7 +256,7 @@ SUSPICIOUS_PATH_KEYWORDS: list[str] = [
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  Signal Strengths & Points
+#  Signal Definitions & Scoring Configuration
 # ═══════════════════════════════════════════════════════════════════════════
 
 class SignalStrength:
@@ -135,14 +280,15 @@ SIGNAL_DEFS: dict[str, dict] = {
     "suspicious_length":    {"strength": SignalStrength.WEAK,     "points": 5},
     "suspicious_encoding":  {"strength": SignalStrength.WEAK,     "points": 8},
     "suspicious_path":      {"strength": SignalStrength.WEAK,     "points": 8},
+    "credential_collection_page": {"strength": SignalStrength.STRONG, "points": 30},
 }
 
 # Weak-signal-only cap: prevents MALICIOUS from weak heuristics alone
-WEAK_ONLY_SCORE_CAP = 40
+WEAK_ONLY_SCORE_CAP = 25
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  Pydantic Models
+#  Pydantic Schemas
 # ═══════════════════════════════════════════════════════════════════════════
 
 class URLDetection(BaseModel):
@@ -163,6 +309,7 @@ class URLFinding(BaseModel):
     detections: list[URLDetection] = Field(default_factory=list)
     risk_score: int = 0
     classification: str = "SAFE"  # SAFE | SUSPICIOUS | MALICIOUS
+    virustotal: dict = Field(default_factory=dict)
 
 
 class URLAnalysisResult(BaseModel):
@@ -176,7 +323,7 @@ class URLAnalysisResult(BaseModel):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  URL Extraction
+#  Extraction
 # ═══════════════════════════════════════════════════════════════════════════
 
 # Regex for extracting bare URLs from plain text
@@ -266,14 +413,10 @@ def extract_urls_from_email(parsed_email: dict) -> list[dict]:
                         existing["anchor_text"] = entry["anchor_text"]
                         break
 
-    # Try to get raw HTML parts from the email for richer extraction.
-    # The existing parser only returns cleaned text in the "body" field,
-    # but if raw_html is available, use it.
     raw_html = parsed_email.get("raw_html", "")
     if raw_html:
         _add(_extract_urls_from_html(raw_html))
 
-    # Always check the body text (plain or cleaned HTML → text)
     body = parsed_email.get("body", "")
     if body:
         _add(_extract_urls_from_text(body))
@@ -282,7 +425,7 @@ def extract_urls_from_email(parsed_email: dict) -> list[dict]:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  URL Normalization
+#  Normalization
 # ═══════════════════════════════════════════════════════════════════════════
 
 def normalize_url(raw_url: str) -> str:
@@ -380,7 +523,6 @@ def _is_ip_address(hostname: str) -> bool:
     """Check if the hostname is a raw IP address."""
     if not hostname:
         return False
-    # Strip brackets from IPv6
     clean = hostname.strip("[]")
     try:
         ipaddress.ip_address(clean)
@@ -396,7 +538,7 @@ def _apply_homoglyph(s: str, mapping: dict[str, str]) -> str:
 
 def _detect_signals(
     url: str,
-    parsed: object,  # urlparse result
+    parsed: ParseResult,
     hostname: str,
     registrable_domain: str,
     anchor_text: str | None,
@@ -412,6 +554,18 @@ def _detect_signals(
             points=sig["points"],
             explanation=explanation,
         ))
+
+    # Active page scan for credential harvesting (if enabled, skipping legitimate brand domains)
+    is_official_brand = any(registrable_domain in info["domains"] for info in BRAND_DB.values())
+    if ENABLE_URL_PAGE_SCAN and not is_official_brand and parsed.scheme in ("http", "https"):
+        page_scan = scan_page_for_credential_collection(url)
+        if page_scan.get("detected"):
+            matches = page_scan.get("matches", [])
+            match_text = ", ".join(matches[:5])
+            _add(
+                "credential_collection_page",
+                f"Page contains credential-collection indicators: {match_text}",
+            )
 
     # 1. Raw IP URL
     if _is_ip_address(hostname):
@@ -472,29 +626,24 @@ def _detect_signals(
         hostname_lower = hostname.lower()
         for brand, info in BRAND_DB.items():
             if brand in hostname_lower:
-                # Check if the registrable domain is one of the brand's legitimate domains
                 if registrable_domain not in info["domains"]:
                     _add("brand_impersonation",
                          f"Brand '{brand}' appears in hostname '{hostname}' "
                          f"but registrable domain is '{registrable_domain}' "
                          f"(not an official {brand} domain)")
-                    break  # one brand match is enough
+                    break
 
     # 11. Homoglyph / lookalike domain detection
     if hostname and not _is_ip_address(hostname) and registrable_domain:
         ext = _TLD_EXTRACT(hostname)
         domain_label = ext.domain.lower() if ext.domain else ""
         if domain_label:
-            # Check if the domain label, after homoglyph substitution, matches a brand
             variant1 = _apply_homoglyph(domain_label, HOMOGLYPH_MAP)
             variant2 = _apply_homoglyph(domain_label, HOMOGLYPH_MAP_ALT)
             for brand, info in BRAND_DB.items():
                 if domain_label == brand:
-                    # Exact match — only flag if the registrable domain is wrong
-                    # (handled by brand_impersonation above)
                     continue
                 if brand in (variant1, variant2) and registrable_domain not in info["domains"]:
-                    # The domain label is a homoglyph of a brand
                     already_flagged = any(d.signal == "brand_impersonation" for d in detections)
                     if not already_flagged:
                         _add("homoglyph_domain",
@@ -520,7 +669,6 @@ def _detect_signals(
     # 14. Anchor text vs destination mismatch
     if anchor_text:
         anchor_clean = anchor_text.strip()
-        # Check if anchor looks like a URL
         anchor_url_match = _URL_RE.match(anchor_clean)
         if anchor_url_match:
             anchor_parsed = urlparse(anchor_clean)
@@ -531,11 +679,9 @@ def _detect_signals(
                      f"Anchor text shows '{anchor_host}' but URL destination is "
                      f"'{hostname}' (domain mismatch: {anchor_reg_domain} != {registrable_domain})")
         else:
-            # Check if anchor text contains a well-known brand that doesn't match dest
             anchor_lower = anchor_clean.lower()
             for brand, info in BRAND_DB.items():
                 if brand in anchor_lower and registrable_domain not in info["domains"]:
-                    # Anchor claims to be a brand but URL goes elsewhere
                     _add("anchor_mismatch",
                          f"Anchor text mentions '{brand}' but URL destination is "
                          f"'{hostname}' ({registrable_domain})")
@@ -545,7 +691,7 @@ def _detect_signals(
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  Per-URL Scoring & Classification
+#  Scoring
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _score_url(detections: list[URLDetection]) -> tuple[int, str]:
@@ -579,7 +725,7 @@ def _score_url(detections: list[URLDetection]) -> tuple[int, str]:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  Main Analysis Entry Point
+#  Public API
 # ═══════════════════════════════════════════════════════════════════════════
 
 def analyze_urls(parsed_email: dict) -> dict:
@@ -619,6 +765,27 @@ def analyze_urls(parsed_email: dict) -> dict:
 
         # Score
         score, classification = _score_url(detections)
+
+        # Optional VirusTotal Reputation Integration
+        virustotal = lookup_url_virustotal(normalized)
+        if virustotal.get("available"):
+            malicious = virustotal.get("malicious", 0)
+            suspicious = virustotal.get("suspicious", 0)
+
+            if malicious >= 3:
+                score += 40
+            elif suspicious >= 3:
+                score += 20
+
+            score = min(100, score)
+
+            if score <= 25:
+                classification = "SAFE"
+            elif score <= 60:
+                classification = "SUSPICIOUS"
+            else:
+                classification = "MALICIOUS"
+
         max_score = max(max_score, score)
 
         finding = URLFinding(
@@ -630,6 +797,7 @@ def analyze_urls(parsed_email: dict) -> dict:
             detections=detections,
             risk_score=score,
             classification=classification,
+            virustotal=virustotal,
         )
         findings.append(finding)
 
@@ -655,10 +823,6 @@ def analyze_urls(parsed_email: dict) -> dict:
     return result.model_dump()
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  Convenience: Analyze a single URL (for testing / direct use)
-# ═══════════════════════════════════════════════════════════════════════════
-
 def analyze_single_url(url: str, anchor_text: str | None = None) -> dict:
     """
     Analyze a single URL string. Useful for unit tests and direct invocations.
@@ -679,6 +843,25 @@ def analyze_single_url(url: str, anchor_text: str | None = None) -> dict:
 
     score, classification = _score_url(detections)
 
+    virustotal = lookup_url_virustotal(normalized)
+    if virustotal.get("available"):
+        malicious = virustotal.get("malicious", 0)
+        suspicious = virustotal.get("suspicious", 0)
+
+        if malicious >= 3:
+            score += 40
+        elif suspicious >= 3:
+            score += 20
+
+        score = min(100, score)
+
+        if score <= 25:
+            classification = "SAFE"
+        elif score <= 60:
+            classification = "SUSPICIOUS"
+        else:
+            classification = "MALICIOUS"
+
     finding = URLFinding(
         original_url=url,
         normalized_url=normalized,
@@ -688,18 +871,13 @@ def analyze_single_url(url: str, anchor_text: str | None = None) -> dict:
         detections=detections,
         risk_score=score,
         classification=classification,
+        virustotal=virustotal,
     )
 
     return finding.model_dump()
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  Standalone Test
-# ═══════════════════════════════════════════════════════════════════════════
-
 if __name__ == "__main__":
-    import json
-
     test_urls = [
         ("https://www.paypal.com/account/activity", None),
         ("https://paypal.com.attacker.com/login", None),
@@ -711,12 +889,12 @@ if __name__ == "__main__":
         ("https://docs.google.com/spreadsheets/d/abc123", None),
     ]
 
-    for url, anchor in test_urls:
-        result = analyze_single_url(url, anchor)
+    for test_url, anchor in test_urls:
+        res = analyze_single_url(test_url, anchor)
         print(f"\n{'='*60}")
-        print(f"URL: {url}")
+        print(f"URL: {test_url}")
         if anchor:
             print(f"Anchor: {anchor}")
-        print(f"Score: {result['risk_score']} -> {result['classification']}")
-        for det in result["detections"]:
-            print(f"  [{det['strength'].upper()}] {det['signal']}: {det['explanation']}")
+        print(f"Score: {res['risk_score']} -> {res['classification']}")
+        for d in res["detections"]:
+            print(f"  [{d['strength'].upper()}] {d['signal']}: {d['explanation']}")

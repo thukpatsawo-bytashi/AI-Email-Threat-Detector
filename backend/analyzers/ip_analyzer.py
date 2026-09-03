@@ -3,20 +3,20 @@ IP Analyzer Module
 
 Extracts public IP addresses from email Received headers, identifies the
 originating sender IP, performs IP geolocation and ISP intelligence lookups,
-queries AbuseIPDB for IP reputation intelligence, and calculates an IP risk score.
+queries AbuseIPDB for live IP reputation intelligence, and calculates an IP risk score.
 """
 
+from functools import lru_cache
 import ipaddress
 import json
 import os
-import re
-from functools import lru_cache
 from pathlib import Path
+import re
 from typing import Any
 import urllib.request
 
-import requests
 from dotenv import load_dotenv
+import requests
 
 # Load backend/.env regardless of execution context
 ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
@@ -136,15 +136,14 @@ def lookup_ip_reputation(ip: str) -> dict[str, Any]:
     if not ip or not is_public_ip(ip):
         return {
             "abuse_confidence_score": 0,
-            "reputation_available": False
+            "reputation_available": False,
         }
 
     api_key = os.getenv("ABUSEIPDB_API_KEY")
-
     if not api_key:
         return {
             "abuse_confidence_score": 0,
-            "reputation_available": False
+            "reputation_available": False,
         }
 
     try:
@@ -152,44 +151,41 @@ def lookup_ip_reputation(ip: str) -> dict[str, Any]:
             "https://api.abuseipdb.com/api/v2/check",
             headers={
                 "Key": api_key,
-                "Accept": "application/json"
+                "Accept": "application/json",
             },
             params={
                 "ipAddress": ip,
-                "maxAgeInDays": 90
+                "maxAgeInDays": 90,
             },
-            timeout=2.0
+            timeout=2.0,
         )
 
         if response.status_code != 200:
             return {
                 "abuse_confidence_score": 0,
-                "reputation_available": False
+                "reputation_available": False,
             }
 
         data = response.json().get("data", {})
-
         return {
-            "abuse_confidence_score": int(
-                data.get("abuseConfidenceScore", 0)
-            ),
-            "reputation_available": True
+            "abuse_confidence_score": int(data.get("abuseConfidenceScore", 0)),
+            "reputation_available": True,
         }
-
     except Exception:
         return {
             "abuse_confidence_score": 0,
-            "reputation_available": False
+            "reputation_available": False,
         }
 
 
 def calculate_ip_risk(
     geo: dict[str, str],
     ip: str,
-    reputation: dict[str, Any] | None = None
+    reputation: dict[str, Any] | None = None,
 ) -> int:
     """
-    Calculates an IP risk score (0-100) based on ISP reputation, AbuseIPDB confidence, and hosting signals.
+    Calculates an IP risk score (0-100) based on AbuseIPDB confidence,
+    ISP reputation, and hosting signals.
     """
     if not ip:
         return 0
@@ -199,13 +195,8 @@ def calculate_ip_risk(
             0,
             min(
                 100,
-                int(
-                    reputation.get(
-                        "abuse_confidence_score",
-                        0
-                    )
-                )
-            )
+                int(reputation.get("abuse_confidence_score", 0)),
+            ),
         )
 
     isp_lower = str(geo.get("isp", "")).lower()
@@ -232,7 +223,6 @@ def analyze(received_chain: list[str]) -> dict[str, Any]:
     Analyzes the Received chain and returns the exact IPResult shape.
     """
     extracted_ips = extract_public_ips(received_chain)
-
     primary_ip = extracted_ips[0] if extracted_ips else ""
 
     if primary_ip:
@@ -241,7 +231,7 @@ def analyze(received_chain: list[str]) -> dict[str, Any]:
         ip_risk_score = calculate_ip_risk(
             geo,
             primary_ip,
-            reputation
+            reputation,
         )
     else:
         geo = {
@@ -252,7 +242,7 @@ def analyze(received_chain: list[str]) -> dict[str, Any]:
         ip_risk_score = 0
         reputation = {
             "abuse_confidence_score": 0,
-            "reputation_available": False
+            "reputation_available": False,
         }
 
     return {
@@ -267,7 +257,7 @@ def analyze(received_chain: list[str]) -> dict[str, Any]:
 if __name__ == "__main__":
     test_chain = [
         "Received: from mail.evil.xyz (unknown [185.123.45.67]) by mx.google.com with ESMTPS",
-        "Received: by mail-wm1-f41.google.com with SMTP id abc123"
+        "Received: by mail-wm1-f41.google.com with SMTP id abc123",
     ]
     res = analyze(test_chain)
     print("IP analyzer result:")

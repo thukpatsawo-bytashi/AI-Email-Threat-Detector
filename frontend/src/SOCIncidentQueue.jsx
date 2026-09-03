@@ -4,6 +4,7 @@ import SOCDetailDrawer from './SOCDetailDrawer';
 const statusColors = {
   'New': { bg: 'rgba(59, 130, 246, 0.12)', color: '#93c5fd', border: 'rgba(59, 130, 246, 0.3)' },
   'Open': { bg: 'rgba(239, 68, 68, 0.1)', color: '#fca5a5', border: 'rgba(239, 68, 68, 0.25)' },
+  'In Review': { bg: 'rgba(234, 179, 8, 0.1)', color: '#fde047', border: 'rgba(234, 179, 8, 0.25)' },
   'Investigating': { bg: 'rgba(234, 179, 8, 0.1)', color: '#fde047', border: 'rgba(234, 179, 8, 0.25)' },
   'Escalated': { bg: 'rgba(168, 85, 247, 0.15)', color: '#d8b4fe', border: 'rgba(168, 85, 247, 0.35)' },
   'False Positive': { bg: 'rgba(148, 163, 184, 0.12)', color: '#94a3b8', border: 'rgba(148, 163, 184, 0.25)' },
