@@ -135,7 +135,7 @@ def seed_initial_data_if_empty(db: Session):
         analyzed_email_id=email_2.id,
         title="Internal HR Spoofing with Suspicious Attachment",
         severity="HIGH",
-        status=IncidentStatus.INVESTIGATING,
+        status=IncidentStatus.IN_REVIEW,
         assigned_to="SOC Tier 1 Analyst",
         summary="Contains attachment masquerading as bonus schedule. Sender spoofed internal address with SPF failure.",
         notes="Quarantined attachment. Analyzing macro signature.",

@@ -8,6 +8,7 @@ tldextract>=5.1.0
 pydantic>=2.6.0
 beautifulsoup4>=4.12.0
 sqlalchemy>=2.0.0
+python-dotenv>=1.0.0
 pandas
 torch
 transformers
