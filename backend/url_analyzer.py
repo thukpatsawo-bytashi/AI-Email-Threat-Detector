@@ -193,6 +193,7 @@ SIGNAL_DEFS: dict[str, dict] = {
     "suspicious_length":    {"strength": SignalStrength.WEAK,     "points": 5},
     "suspicious_encoding":  {"strength": SignalStrength.WEAK,     "points": 8},
     "suspicious_path":      {"strength": SignalStrength.WEAK,     "points": 8},
+    "credential_collection_page": {"strength": SignalStrength.STRONG, "points": 30},
 }
 
 # Weak-signal-only cap: prevents MALICIOUS from weak heuristics alone
@@ -451,6 +452,90 @@ def _apply_homoglyph(s: str, mapping: dict[str, str]) -> str:
     """Replace homoglyph characters in a string using the given mapping."""
     return "".join(mapping.get(c, c) for c in s)
 
+def scan_page_for_credential_collection(url: str) -> dict:
+    """
+    Fetch a URL and look for forms/fields that appear to collect
+    sensitive credentials or secrets.
+
+    Returns:
+        {
+            "detected": bool,
+            "matches": list[str],
+            "message": str
+        }
+    """
+    suspicious_terms = [
+        "password",
+        "passwd",
+        "passcode",
+        "social security",
+        "ssn",
+        "seed phrase",
+        "recovery phrase",
+        "private key",
+        "secret phrase",
+    ]
+
+    try:
+        response = requests.get(
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0 AI-Email-Threat-Detector/1.0"
+            },
+            timeout=5,
+            allow_redirects=False,
+        )
+
+        content_type = response.headers.get("Content-Type", "").lower()
+
+        if "text/html" not in content_type:
+            return {
+                "detected": False,
+                "matches": [],
+                "message": "Response was not HTML",
+            }
+
+        soup = BeautifulSoup(response.text, "html.parser")
+
+        page_text = soup.get_text(" ", strip=True).lower()
+        matches = []
+
+        for term in suspicious_terms:
+            if term in page_text:
+                matches.append(term)
+
+        # Also inspect form/input attributes.
+        for element in soup.find_all(["form", "input", "textarea", "label"]):
+            element_text = " ".join(
+                [
+                    element.get("name", ""),
+                    element.get("id", ""),
+                    element.get("placeholder", ""),
+                    element.get("aria-label", ""),
+                    element.get_text(" ", strip=True),
+                ]
+            ).lower()
+
+            for term in suspicious_terms:
+                if term in element_text and term not in matches:
+                    matches.append(term)
+
+        return {
+            "detected": bool(matches),
+            "matches": matches[:10],
+            "message": (
+                "Sensitive credential-collection indicators detected"
+                if matches
+                else "No credential-collection indicators detected"
+            ),
+        }
+
+    except requests.RequestException as exc:
+        return {
+            "detected": False,
+            "matches": [],
+            "message": f"Page scan failed: {exc}",
+        }
 
 def _detect_signals(
     url: str,
@@ -470,7 +555,17 @@ def _detect_signals(
             points=sig["points"],
             explanation=explanation,
         ))
+        # Active page scan for fresh credential-collection attacks
+    page_scan = scan_page_for_credential_collection(url)
 
+    if page_scan.get("detected"):
+        matches = page_scan.get("matches", [])
+        match_text = ", ".join(matches[:5])
+
+        _add(
+            "credential_collection_page",
+            f"Page contains credential-collection indicators: {match_text}",
+        )
     # 1. Raw IP URL
     if _is_ip_address(hostname):
         _add("raw_ip_url", f"URL uses raw IP address ({hostname}) instead of a domain name")
