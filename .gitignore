@@ -8,6 +8,7 @@ backend/training_checkpoints/
 # Python
 venv/
 __pycache__/
+.pytest_cache/
 *.pyc
 
 # Environment variables
