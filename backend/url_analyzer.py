@@ -13,11 +13,69 @@ from __future__ import annotations
 import html as html_module
 import ipaddress
 import re
+import os
+import requests
 from urllib.parse import urlparse, unquote, parse_qs
 
 from bs4 import BeautifulSoup
+from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 import tldextract
+
+load_dotenv("/workspaces/AI-Email-Threat-Detector/.env")
+
+def lookup_url_virustotal(url: str) -> dict:
+    """Look up a URL in VirusTotal and return reputation evidence."""
+    api_key = os.getenv("VIRUSTOTAL_API_KEY")
+
+    if not api_key:
+        return {
+            "available": False,
+            "malicious": 0,
+            "suspicious": 0,
+            "harmless": 0,
+            "message": "VirusTotal API key not configured",
+        }
+
+    try:
+        import base64
+
+        url_id = base64.urlsafe_b64encode(url.encode()).decode().strip("=")
+
+        response = requests.get(
+            f"https://www.virustotal.com/api/v3/urls/{url_id}",
+            headers={"x-apikey": api_key},
+            timeout=5,
+        )
+
+        if response.status_code != 200:
+            return {
+                "available": False,
+                "malicious": 0,
+                "suspicious": 0,
+                "harmless": 0,
+                "message": f"VirusTotal HTTP {response.status_code}",
+            }
+
+        data = response.json().get("data", {})
+        stats = data.get("attributes", {}).get("last_analysis_stats", {})
+
+        return {
+            "available": True,
+            "malicious": int(stats.get("malicious", 0)),
+            "suspicious": int(stats.get("suspicious", 0)),
+            "harmless": int(stats.get("harmless", 0)),
+            "message": "VirusTotal lookup successful",
+        }
+
+    except Exception as exc:
+        return {
+            "available": False,
+            "malicious": 0,
+            "suspicious": 0,
+            "harmless": 0,
+            "message": f"VirusTotal lookup failed: {exc}",
+        }
 
 
 _TLD_EXTRACT = tldextract.TLDExtract(
@@ -163,7 +221,7 @@ class URLFinding(BaseModel):
     detections: list[URLDetection] = Field(default_factory=list)
     risk_score: int = 0
     classification: str = "SAFE"  # SAFE | SUSPICIOUS | MALICIOUS
-
+    virustotal: dict = Field(default_factory=dict)
 
 class URLAnalysisResult(BaseModel):
     """Aggregate result across all URLs found in the email."""
@@ -619,6 +677,27 @@ def analyze_urls(parsed_email: dict) -> dict:
 
         # Score
         score, classification = _score_url(detections)
+
+        virustotal = lookup_url_virustotal(normalized)
+
+        if virustotal.get("available"):
+            malicious = virustotal.get("malicious", 0)
+            suspicious = virustotal.get("suspicious", 0)
+
+            if malicious >= 3:
+                score += 40
+            elif suspicious >= 3:
+                score += 20
+
+            score = min(100, score)
+
+            if score <= 25:
+                classification = "SAFE"
+            elif score <= 60:
+                classification = "SUSPICIOUS"
+            else:
+                classification = "MALICIOUS"
+
         max_score = max(max_score, score)
 
         finding = URLFinding(
@@ -630,6 +709,7 @@ def analyze_urls(parsed_email: dict) -> dict:
             detections=detections,
             risk_score=score,
             classification=classification,
+            virustotal=virustotal,
         )
         findings.append(finding)
 
@@ -679,6 +759,26 @@ def analyze_single_url(url: str, anchor_text: str | None = None) -> dict:
 
     score, classification = _score_url(detections)
 
+    virustotal = lookup_url_virustotal(normalized)
+
+    if virustotal.get("available"):
+        malicious = virustotal.get("malicious", 0)
+        suspicious = virustotal.get("suspicious", 0)
+
+        if malicious >= 3:
+            score += 40
+        elif suspicious >= 3:
+            score += 20
+
+        score = min(100, score)
+
+        if score <= 25:
+            classification = "SAFE"
+        elif score <= 60:
+            classification = "SUSPICIOUS"
+        else:
+            classification = "MALICIOUS"
+
     finding = URLFinding(
         original_url=url,
         normalized_url=normalized,
@@ -688,6 +788,7 @@ def analyze_single_url(url: str, anchor_text: str | None = None) -> dict:
         detections=detections,
         risk_score=score,
         classification=classification,
+        virustotal=virustotal,
     )
 
     return finding.model_dump()
