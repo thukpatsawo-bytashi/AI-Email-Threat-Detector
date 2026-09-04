@@ -13,6 +13,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+# Pre-download the HuggingFace model during build to bake it into the image cache
+# This prevents the 260MB download on the first API request, removing the delay
+RUN python -c "from transformers import pipeline; pipeline('text-classification', model='bixby404/phishing-detection', tokenizer='bixby404/phishing-detection')"
+
 RUN mkdir -p /app/data
 
 EXPOSE 8000

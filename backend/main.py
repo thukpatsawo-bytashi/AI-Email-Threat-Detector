@@ -12,11 +12,13 @@ Provides:
 """
 
 from contextlib import asynccontextmanager
+import concurrent.futures
 from datetime import datetime, timedelta, timezone
 import traceback
 from typing import Any
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Query
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -40,6 +42,7 @@ from analyzers import (
 )
 from ml import classify_nlp
 from alerts.webhook import send_alert
+from imap_monitor import imap_monitor
 
 
 def utcnow() -> datetime:
@@ -169,6 +172,14 @@ def format_email_entry_for_frontend(email: AnalyzedEmail) -> dict[str, Any]:
         "filename": email.filename,
         "body_preview": (email.body[:400] if email.body else ""),
         "analysis_result": res,
+        # Geo / IP intel
+        "geo": res.get("geo", {}),
+        "primary_ip": res.get("primary_ip", ""),
+        "ip_risk_score": res.get("ip_risk_score", 0),
+        "reputation": res.get("reputation", {}),
+        # URL analysis
+        "urls": res.get("urls", []),
+        "url_risk_score": res.get("url_risk_score", 0),
     }
 
 
@@ -177,13 +188,21 @@ def execute_analysis_pipeline(parsed: dict, filename: str, db: Session) -> dict[
     Shared execution engine that runs headers, NLP, URLs, IP, and risk computation,
     persisting results to the database and raising an incident if required.
     """
-    header_res = analyze_headers(parsed)
     nlp_input = "\n\n".join(
         part for part in (parsed.get("subject", ""), parsed.get("body", "")) if part
     )
-    nlp_res = classify_nlp(nlp_input)
-    url_res = analyze_urls(parsed)
-    ip_res = analyze_ip(parsed.get("received_chain", []))
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        f_header = executor.submit(analyze_headers, parsed)
+        f_nlp = executor.submit(classify_nlp, nlp_input)
+        f_url = executor.submit(analyze_urls, parsed)
+        f_ip = executor.submit(analyze_ip, parsed.get("received_chain", []))
+
+        header_res = f_header.result()
+        nlp_res = f_nlp.result()
+        url_res = f_url.result()
+        ip_res = f_ip.result()
+
     final_verdict = compute_risk(header_res, nlp_res, ip_res, url_res)
 
     response_payload = {
@@ -274,28 +293,36 @@ def root():
 
 # ── 1. Analyze Email from File Upload (.eml) ─────────────────────────
 @app.post("/api/analyze")
-async def analyze_email(file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def analyze_email(files: list[UploadFile] = File(...), db: Session = Depends(get_db)):
     """
-    Accepts an uploaded .eml file, runs the multi-stage threat detection pipeline,
-    persists the results, and creates a dynamic incident if risky.
+    Accepts uploaded .eml files, runs the multi-stage threat detection pipeline,
+    persists the results, and creates dynamic incidents if risky.
     """
-    if not (file.filename or "").lower().endswith(".eml"):
-        raise HTTPException(status_code=400, detail="Only .eml files are supported.")
+    results = []
+    for file in files:
+        if not (file.filename or "").lower().endswith(".eml"):
+            continue
 
-    file_bytes = await file.read()
-    if not file_bytes:
-        raise HTTPException(status_code=400, detail="The uploaded file is empty.")
+        file_bytes = await file.read()
+        if not file_bytes:
+            continue
 
-    try:
-        parsed = parse_email(file_bytes)
-        safe_filename: str = file.filename or "unknown.eml"
-        return execute_analysis_pipeline(parsed, safe_filename, db)
-    except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(
-            status_code=500,
-            detail=f"An error occurred while analyzing the email: {str(e)}"
-        )
+        try:
+            parsed = parse_email(file_bytes)
+            safe_filename: str = file.filename or "unknown.eml"
+            res = execute_analysis_pipeline(parsed, safe_filename, db)
+            results.append(res)
+        except Exception as e:
+            traceback.print_exc()
+            raise HTTPException(
+                status_code=500,
+                detail=f"An error occurred while analyzing the email {file.filename}: {str(e)}"
+            )
+
+    if not results and files:
+        raise HTTPException(status_code=400, detail="No valid .eml files provided.")
+
+    return results
 
 
 # ── 2. Dynamic Input Analysis (Direct Text / Pasted Email) ───────────
@@ -407,6 +434,71 @@ def get_incident(item_id: int, db: Session = Depends(get_db)):
     raise HTTPException(status_code=404, detail="Analyzed email or incident not found")
 
 
+@app.get("/api/incidents/{item_id}/report")
+def download_incident_report(item_id: int, db: Session = Depends(get_db)):
+    """
+    Generates a downloadable JSON threat analysis report for an incident.
+    """
+    email = db.query(AnalyzedEmail).filter(AnalyzedEmail.id == item_id).first()
+    if not email:
+        incident = db.query(Incident).filter(Incident.id == item_id).first()
+        if incident and incident.analyzed_email:
+            email = incident.analyzed_email
+    
+    if not email:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    res = email.analysis_result or {}
+    inc = email.incidents[0] if email.incidents else None
+
+    report = {
+        "report_title": "AI Email Threat Analysis Report",
+        "generated_at": utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
+        "summary": {
+            "risk_score": email.risk_score,
+            "classification": email.classification,
+            "evidence_level": email.evidence_level,
+        },
+        "email_metadata": {
+            "from": email.sender,
+            "to": email.recipient,
+            "subject": email.subject,
+            "date_analyzed": email.created_at.strftime("%Y-%m-%d %H:%M:%S UTC"),
+        },
+        "authentication": {
+            "spf": res.get("spf", "N/A"),
+            "dkim": res.get("dkim", "N/A"),
+            "dmarc": res.get("dmarc", "N/A"),
+        },
+        "score_breakdown": {
+            "header_risk_score": email.header_risk_score,
+            "phishing_probability": email.phishing_probability,
+            "ip_risk_score": email.ip_risk_score,
+            "url_risk_score": email.url_risk_score,
+        },
+        "ip_intelligence": {
+            "primary_ip": res.get("primary_ip", ""),
+            "geo": res.get("geo", {}),
+            "reputation": res.get("reputation", {}),
+        },
+        "url_analysis": res.get("urls", []),
+        "key_findings": res.get("reasons", []),
+        "flagged_terms": res.get("flagged_terms", []),
+        "incident": {
+            "id": inc.id if inc else None,
+            "status": inc.status.value if inc else "N/A",
+            "severity": email.classification,
+        } if inc else None,
+    }
+
+    return JSONResponse(
+        content=report,
+        headers={
+            "Content-Disposition": f'attachment; filename="threat_report_{item_id}.json"'
+        },
+    )
+
+
 @app.patch("/api/incidents/{item_id}")
 def update_incident(
     item_id: int,
@@ -467,6 +559,60 @@ def update_incident(
         "success": True,
         "incident": format_email_entry_for_frontend(incident.analyzed_email)
     }
+
+
+class BulkDeletePayload(BaseModel):
+    item_ids: list[int]
+
+
+@app.delete("/api/incidents/bulk")
+def delete_incidents_bulk(payload: BulkDeletePayload, db: Session = Depends(get_db)):
+    """
+    Deletes multiple incidents and their associated analyzed emails.
+    """
+    if not payload.item_ids:
+        return {"success": True, "message": "No items to delete"}
+
+    deleted_count = 0
+    for item_id in payload.item_ids:
+        email = db.query(AnalyzedEmail).filter(AnalyzedEmail.id == item_id).first()
+        if email:
+            incident = db.query(Incident).filter(Incident.analyzed_email_id == email.id).first()
+            if incident:
+                db.delete(incident)
+            db.delete(email)
+            deleted_count += 1
+        else:
+            incident = db.query(Incident).filter(Incident.id == item_id).first()
+            if incident:
+                db.delete(incident)
+                deleted_count += 1
+
+    db.commit()
+    return {"success": True, "message": f"Deleted {deleted_count} incidents successfully"}
+
+
+@app.delete("/api/incidents/{item_id}")
+def delete_incident(item_id: int, db: Session = Depends(get_db)):
+    """
+    Deletes an incident and its associated analyzed email.
+    """
+    email = db.query(AnalyzedEmail).filter(AnalyzedEmail.id == item_id).first()
+    if email:
+        incident = db.query(Incident).filter(Incident.analyzed_email_id == email.id).first()
+        if incident:
+            db.delete(incident)
+        db.delete(email)
+        db.commit()
+        return {"success": True, "message": "Deleted successfully"}
+    
+    incident = db.query(Incident).filter(Incident.id == item_id).first()
+    if incident:
+        db.delete(incident)
+        db.commit()
+        return {"success": True, "message": "Deleted successfully"}
+
+    raise HTTPException(status_code=404, detail="Incident or analyzed email not found")
 
 
 # ── SOC Summary Statistics (100% Dynamic) ─────────────────────────────
@@ -568,3 +714,48 @@ def get_stats_charts(db: Session = Depends(get_db)):
         "verdicts_over_time": verdicts,
         "top_terms": terms_data,
     }
+
+
+# ── IMAP Live Email Monitoring ─────────────────────────────────────────
+class IMAPConfig(BaseModel):
+    host: str
+    port: int = 993
+    email: str
+    password: str
+    folder: str = "INBOX"
+    interval: int = 30
+
+
+@app.post("/api/imap/start")
+def start_imap_monitor(config: IMAPConfig, db: Session = Depends(get_db)):
+    """
+    Starts IMAP monitoring with the provided config.
+    New emails are analyzed and added to the incident queue in real time.
+    """
+    def analysis_callback(raw_bytes: bytes, filename: str):
+        from database import SessionLocal
+        local_db = SessionLocal()
+        try:
+            parsed = parse_email(raw_bytes)
+            if parsed.get("body") or parsed.get("subject"):
+                execute_analysis_pipeline(parsed, filename, local_db)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+        finally:
+            local_db.close()
+
+    result = imap_monitor.start(config.model_dump(), analysis_callback)
+    return result
+
+
+@app.post("/api/imap/stop")
+def stop_imap_monitor():
+    """Stops the active IMAP monitor."""
+    return imap_monitor.stop()
+
+
+@app.get("/api/imap/status")
+def get_imap_status():
+    """Returns the current IMAP monitor status."""
+    return imap_monitor.status

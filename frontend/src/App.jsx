@@ -2,6 +2,7 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom';
 import Dashboard from './Dashboard';
 import UserPortal from './UserPortal';
+import IMAPMonitor from './IMAPMonitor';
 
 /* ============================================================
    SOC Analyst Layout (sidebar + nested routes under /soc)
@@ -23,24 +24,11 @@ const Sidebar = () => {
       ),
     },
     {
-      path: '/soc/reports',
-      label: 'Reports',
+      path: '/soc/monitor',
+      label: 'Live Monitor',
       icon: (
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: '18px', marginRight: '12px', flexShrink: 0 }}>
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-          <polyline points="14 2 14 8 20 8" />
-          <line x1="16" y1="13" x2="8" y2="13" />
-          <line x1="16" y1="17" x2="8" y2="17" />
-        </svg>
-      ),
-    },
-    {
-      path: '/soc/settings',
-      label: 'Settings',
-      icon: (
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: '18px', marginRight: '12px', flexShrink: 0 }}>
-          <circle cx="12" cy="12" r="3" />
-          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+          <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
         </svg>
       ),
     },
@@ -137,34 +125,7 @@ const SOCLayout = () => {
       <main className="main-content">
         <Routes>
           <Route index element={<Dashboard />} />
-          <Route
-            path="reports"
-            element={
-              <div style={{ animation: 'fadeIn 0.5s ease' }}>
-                <div className="glass-panel" style={{ textAlign: 'center', padding: '80px 40px' }}>
-                  <div style={{ fontSize: '3rem', marginBottom: '16px' }}>📊</div>
-                  <h2 className="dashboard-title" style={{ marginBottom: '12px' }}>Reports</h2>
-                  <p style={{ color: 'var(--text-secondary)', maxWidth: '400px', margin: '0 auto', lineHeight: 1.7 }}>
-                    Automated threat reports and executive summaries are coming soon.
-                  </p>
-                </div>
-              </div>
-            }
-          />
-          <Route
-            path="settings"
-            element={
-              <div style={{ animation: 'fadeIn 0.5s ease' }}>
-                <div className="glass-panel" style={{ textAlign: 'center', padding: '80px 40px' }}>
-                  <div style={{ fontSize: '3rem', marginBottom: '16px' }}>⚙️</div>
-                  <h2 className="dashboard-title" style={{ marginBottom: '12px' }}>Settings</h2>
-                  <p style={{ color: 'var(--text-secondary)', maxWidth: '400px', margin: '0 auto', lineHeight: 1.7 }}>
-                    Configure alert thresholds, integrations, and notification preferences.
-                  </p>
-                </div>
-              </div>
-            }
-          />
+          <Route path="monitor" element={<IMAPMonitor />} />
         </Routes>
       </main>
     </div>
