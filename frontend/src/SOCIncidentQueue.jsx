@@ -52,6 +52,8 @@ const SOCIncidentQueue = ({ onIncidentUpdated }) => {
   const [filterSeverity, setFilterSeverity] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedIncident, setSelectedIncident] = useState(null);
+  const [selectedIncidents, setSelectedIncidents] = useState(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   const fetchIncidents = useCallback(async () => {
     try {
@@ -86,14 +88,70 @@ const SOCIncidentQueue = ({ onIncidentUpdated }) => {
   }, [fetchIncidents]);
 
   const handleIncidentStatusChanged = (updatedInc) => {
-    setIncidents(prev => prev.map(inc => (inc.id === updatedInc.id ? updatedInc : inc)));
-    if (selectedIncident && selectedIncident.id === updatedInc.id) {
-      setSelectedIncident(updatedInc);
+    if (updatedInc && updatedInc.isDeleted) {
+      setIncidents(prev => prev.filter(inc => inc.id !== updatedInc.id));
+      if (selectedIncident && selectedIncident.id === updatedInc.id) {
+        setSelectedIncident(null);
+      }
+      setSelectedIncidents(prev => {
+        const next = new Set(prev);
+        next.delete(updatedInc.id);
+        return next;
+      });
+    } else {
+      setIncidents(prev => prev.map(inc => (inc.id === updatedInc.id ? updatedInc : inc)));
+      if (selectedIncident && selectedIncident.id === updatedInc.id) {
+        setSelectedIncident(updatedInc);
+      }
     }
     if (onIncidentUpdated) {
       onIncidentUpdated(updatedInc);
     }
     fetchIncidents();
+  };
+
+  const toggleSelection = (e, id) => {
+    e.stopPropagation();
+    const next = new Set(selectedIncidents);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelectedIncidents(next);
+  };
+
+  const toggleAll = () => {
+    if (selectedIncidents.size === incidents.length && incidents.length > 0) {
+      setSelectedIncidents(new Set());
+    } else {
+      setSelectedIncidents(new Set(incidents.map(i => i.id)));
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIncidents.size === 0) return;
+    if (!window.confirm(`Are you sure you want to delete ${selectedIncidents.size} incidents permanently?`)) return;
+    setBulkDeleting(true);
+    try {
+      // Map selected string IDs to numeric IDs
+      const numericIds = incidents
+        .filter(inc => selectedIncidents.has(inc.id))
+        .map(inc => inc.numeric_id || parseInt(String(inc.id).replace(/\D/g, ''), 10));
+      
+      const res = await fetch('/api/incidents/bulk', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_ids: numericIds })
+      });
+      if (res.ok) {
+        setSelectedIncidents(new Set());
+        fetchIncidents();
+      } else {
+        alert('Failed to delete incidents');
+      }
+    } catch (err) {
+      alert('Network error during bulk delete');
+    } finally {
+      setBulkDeleting(false);
+    }
   };
 
   const severityCounts = incidents.reduce((acc, inc) => {
@@ -186,15 +244,41 @@ const SOCIncidentQueue = ({ onIncidentUpdated }) => {
         >
           ↻ Refresh
         </button>
+        {selectedIncidents.size > 0 && (
+          <button
+            onClick={handleBulkDelete}
+            disabled={bulkDeleting}
+            style={{
+              background: 'rgba(239, 68, 68, 0.15)',
+              border: '1px solid rgba(239, 68, 68, 0.3)',
+              color: '#fca5a5',
+              padding: '8px 14px',
+              borderRadius: '8px',
+              cursor: bulkDeleting ? 'not-allowed' : 'pointer',
+              fontSize: '0.82rem',
+              fontWeight: 600,
+            }}
+          >
+            {bulkDeleting ? 'Deleting...' : `🗑️ Delete (${selectedIncidents.size})`}
+          </button>
+        )}
       </div>
 
       <div className="incident-table-wrapper">
         <table className="incident-table">
           <thead>
             <tr>
+              <th style={{ width: '40px', textAlign: 'center' }}>
+                <input 
+                  type="checkbox" 
+                  checked={incidents.length > 0 && selectedIncidents.size === incidents.length}
+                  onChange={toggleAll}
+                />
+              </th>
               <th>ID</th>
               <th>Date</th>
               <th>Sender</th>
+              <th>Location</th>
               <th>Subject</th>
               <th>Risk</th>
               <th>Severity</th>
@@ -210,9 +294,21 @@ const SOCIncidentQueue = ({ onIncidentUpdated }) => {
                   onClick={() => setSelectedIncident(inc)}
                   style={{ animation: `fadeIn 0.3s ease ${Math.min(i * 0.04, 0.5)}s both` }}
                 >
+                  <td style={{ textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
+                    <input 
+                      type="checkbox" 
+                      checked={selectedIncidents.has(inc.id)}
+                      onChange={(e) => toggleSelection(e, inc.id)}
+                    />
+                  </td>
                   <td style={{ fontWeight: 600, color: 'var(--accent-color)', fontSize: '0.82rem' }}>{inc.id}</td>
                   <td style={{ color: 'var(--text-muted)', fontSize: '0.82rem', whiteSpace: 'nowrap' }}>{inc.date}</td>
                   <td style={{ fontFamily: "'SF Mono', 'Fira Code', monospace", fontSize: '0.8rem', color: 'var(--text-secondary)', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{inc.sender}</td>
+                  <td style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+                    {inc.geo && inc.geo.country && inc.geo.country !== 'Unknown'
+                      ? `📍 ${inc.geo.city && inc.geo.city !== 'Unknown' ? inc.geo.city + ', ' : ''}${inc.geo.country}`
+                      : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                  </td>
                   <td style={{ maxWidth: '280px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{inc.subject}</td>
                   <td><RiskBar score={inc.riskScore} /></td>
                   <td><span className={`badge ${(inc.severity || 'low').toLowerCase()}`}>{inc.severity}</span></td>

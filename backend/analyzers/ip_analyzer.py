@@ -89,7 +89,7 @@ def extract_public_ips(received_chain: list[str]) -> list[str]:
 
 
 @lru_cache(maxsize=512)
-def lookup_geo(ip: str) -> dict[str, str]:
+def lookup_geo(ip: str) -> dict[str, Any]:
     """
     Performs IP geolocation lookup using ip-api.com with timeout.
     Falls back gracefully to generic defaults.
@@ -98,13 +98,17 @@ def lookup_geo(ip: str) -> dict[str, str]:
         "country": "Unknown",
         "city": "Unknown",
         "isp": "Unknown Network",
+        "proxy": False,
+        "hosting": False,
+        "lat": None,
+        "lon": None,
     }
 
     if not ip or not is_public_ip(ip):
         return default_unknown
 
     try:
-        url = f"http://ip-api.com/json/{ip}?fields=status,country,city,isp,org,as"
+        url = f"http://ip-api.com/json/{ip}?fields=status,country,city,isp,org,as,lat,lon"
         req = urllib.request.Request(
             url,
             headers={"User-Agent": "AIEmailThreatDetector/1.0"}
@@ -112,10 +116,21 @@ def lookup_geo(ip: str) -> dict[str, str]:
         with urllib.request.urlopen(req, timeout=2.0) as response:
             data = json.loads(response.read().decode())
             if data.get("status") == "success":
+                isp = data.get("isp") or data.get("org") or data.get("as") or "Unknown"
+                isp_lower = str(isp).lower()
+                
+                # Manually infer proxy/hosting since ip-api free tier doesn't support those fields
+                is_proxy = any(kw in isp_lower for kw in ["vpn", "proxy", "tor"])
+                is_hosting = any(kw in isp_lower for kw in ["bulletproof", "anonymous", "m247", "leaseweb", "choopa", "vultr", "digitalocean", "linode", "hetzner", "ovh", "hostinger", "datacenter", "hosting", "amazon", "google cloud", "azure"])
+
                 return {
                     "country": data.get("country", "Unknown") or "Unknown",
                     "city": data.get("city", "Unknown") or "Unknown",
-                    "isp": data.get("isp") or data.get("org") or data.get("as") or "Unknown",
+                    "isp": isp,
+                    "proxy": is_proxy,
+                    "hosting": is_hosting,
+                    "lat": data.get("lat"),
+                    "lon": data.get("lon"),
                 }
     except Exception:
         pass
@@ -179,7 +194,7 @@ def lookup_ip_reputation(ip: str) -> dict[str, Any]:
 
 
 def calculate_ip_risk(
-    geo: dict[str, str],
+    geo: dict[str, Any],
     ip: str,
     reputation: dict[str, Any] | None = None,
 ) -> int:
@@ -204,18 +219,27 @@ def calculate_ip_risk(
     if not isp_lower or isp_lower in ("unknown", "unknown network"):
         return 0
 
-    # 1. Trusted legitimate email providers / residential ISPs
-    for trusted in TRUSTED_MAIL_ISPS:
-        if trusted in isp_lower:
-            return 5
+    base_score = 10
 
-    # 2. Known VPN, Tor, Bulletproof, or Cloud Hosting senders
+    # 1. Known VPN, Proxy, or Datacenter IP (from ip-api)
+    if geo.get("proxy"):
+        base_score = max(base_score, 85)
+    elif geo.get("hosting"):
+        base_score = max(base_score, 70)
+
+    # 2. String matching for Known VPN, Tor, Bulletproof, or Cloud Hosting senders
     for risky in HIGH_RISK_ISP_KEYWORDS:
         if risky in isp_lower:
-            return 60
+            base_score = max(base_score, 60)
 
-    # 3. Public IP with no specific reputation evidence.
-    return 10
+    # 3. Trusted legitimate email providers / residential ISPs
+    # Only trust if it's NOT a proxy/hosting
+    if not geo.get("proxy") and not geo.get("hosting"):
+        for trusted in TRUSTED_MAIL_ISPS:
+            if trusted in isp_lower:
+                return 5
+
+    return base_score
 
 
 def analyze(received_chain: list[str]) -> dict[str, Any]:
@@ -238,6 +262,10 @@ def analyze(received_chain: list[str]) -> dict[str, Any]:
             "country": "Unknown",
             "city": "Unknown",
             "isp": "Unknown",
+            "proxy": False,
+            "hosting": False,
+            "lat": None,
+            "lon": None,
         }
         ip_risk_score = 0
         reputation = {

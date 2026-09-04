@@ -19,7 +19,7 @@ export default function Upload({ onResult }) {
   const [activeTab, setActiveTab] = useState('file'); // 'file' | 'text'
 
   // File upload state
-  const [file, setFile] = useState(null);
+  const [files, setFiles] = useState([]);
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef(null);
 
@@ -34,20 +34,23 @@ export default function Upload({ onResult }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  function handleFile(f) {
+  function handleFiles(fileList) {
     setError(null);
-    if (!f) return;
-    if (!f.name.toLowerCase().endsWith('.eml')) {
-      setError('Only .eml files are supported.');
-      return;
+    if (!fileList || fileList.length === 0) return;
+    
+    const validFiles = Array.from(fileList).filter(f => f.name.toLowerCase().endsWith('.eml'));
+    if (validFiles.length !== fileList.length) {
+      setError('Some files were ignored. Only .eml files are supported.');
     }
-    setFile(f);
+    if (validFiles.length > 0) {
+      setFiles(prev => [...prev, ...validFiles]);
+    }
   }
 
   function handleDrop(e) {
     e.preventDefault();
     setDragOver(false);
-    handleFile(e.dataTransfer.files?.[0]);
+    handleFiles(e.dataTransfer.files);
   }
 
   function handleDragOver(e) {
@@ -80,12 +83,12 @@ export default function Upload({ onResult }) {
   }
 
   async function handleAnalyzeFile() {
-    if (!file) return;
+    if (files.length === 0) return;
     setLoading(true);
     setError(null);
     try {
       const formData = new FormData();
-      formData.append('file', file);
+      files.forEach(f => formData.append('files', f));
 
       let res;
       try {
@@ -98,7 +101,7 @@ export default function Upload({ onResult }) {
       if (!res.ok) {
         throw new Error(data.detail || `Server returned error status ${res.status}`);
       }
-      onResult(data);
+      onResult(Array.isArray(data) ? data : [data]);
     } catch (err) {
       setError(err.message || 'Analysis failed. Please ensure the backend server is running.');
     } finally {
@@ -141,7 +144,7 @@ export default function Upload({ onResult }) {
       if (!res.ok) {
         throw new Error(data.detail || `Server returned error status ${res.status}`);
       }
-      onResult(data);
+      onResult(Array.isArray(data) ? data : [data]);
     } catch (err) {
       setError(err.message || 'Analysis failed. Please ensure the backend server is running.');
     } finally {
@@ -230,32 +233,40 @@ export default function Upload({ onResult }) {
                 ref={inputRef}
                 type="file"
                 accept=".eml"
+                multiple
                 style={{ display: 'none' }}
-                onChange={(e) => handleFile(e.target.files?.[0])}
+                onChange={(e) => handleFiles(e.target.files)}
               />
             </div>
 
-            {file && (
-              <div className="user-selected-file">
-                <div className="user-file-icon">📎</div>
-                <div className="user-file-info">
-                  <div className="user-file-name">{file.name}</div>
-                  <div className="user-file-size">{(file.size / 1024).toFixed(1)} KB</div>
-                </div>
-                <button
-                  className="user-file-remove"
-                  onClick={(e) => { e.stopPropagation(); setFile(null); }}
-                  aria-label="Remove file"
-                >
-                  ✕
-                </button>
+            {files.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '16px' }}>
+                {files.map((f, i) => (
+                  <div key={`${f.name}-${i}`} className="user-selected-file">
+                    <div className="user-file-icon">📎</div>
+                    <div className="user-file-info">
+                      <div className="user-file-name">{f.name}</div>
+                      <div className="user-file-size">{(f.size / 1024).toFixed(1)} KB</div>
+                    </div>
+                    <button
+                      className="user-file-remove"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setFiles(files.filter((_, index) => index !== i));
+                      }}
+                      aria-label="Remove file"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
               </div>
             )}
 
             <button
               id="analyze-btn"
               className={`user-analyze-btn${loading ? ' loading' : ''}`}
-              disabled={!file || loading}
+              disabled={files.length === 0 || loading}
               onClick={handleAnalyzeFile}
             >
               {loading ? (
@@ -269,7 +280,7 @@ export default function Upload({ onResult }) {
                     <circle cx="11" cy="11" r="8" />
                     <line x1="21" y1="21" x2="16.65" y2="16.65" />
                   </svg>
-                  Analyze .eml File
+                  Analyze {files.length > 1 ? `${files.length} Files` : '.eml File'}
                 </>
               )}
             </button>

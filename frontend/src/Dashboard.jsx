@@ -5,7 +5,6 @@ import SOCIncidentQueue from './SOCIncidentQueue';
 const Dashboard = () => {
   const [summary, setSummary] = useState({
     active_incidents: '0',
-    avg_resolution: 'N/A',
     emails_scanned: '0',
     threat_rate: '0.0%',
   });
@@ -24,7 +23,6 @@ const Dashboard = () => {
         const data = await res.json();
         setSummary({
           active_incidents: String(data.active_incidents ?? 0),
-          avg_resolution: String(data.avg_resolution || '24m'),
           emails_scanned: Number(data.emails_scanned ?? 0).toLocaleString(),
           threat_rate: String(data.threat_rate || '0.0%'),
         });
@@ -48,7 +46,6 @@ const Dashboard = () => {
 
   const stats = [
     { label: 'Active Incidents', value: summary.active_incidents, color: '#ef4444', icon: '🔴' },
-    { label: 'Avg Resolution', value: summary.avg_resolution, color: '#22c55e', icon: '⚡' },
     { label: 'Emails Scanned', value: summary.emails_scanned, color: '#6366f1', icon: '📨' },
     { label: 'Threat Rate', value: summary.threat_rate, color: '#f97316', icon: '🎯' },
   ];

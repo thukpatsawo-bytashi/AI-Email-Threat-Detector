@@ -273,6 +273,56 @@ const SOCDetailDrawer = ({ incident, isOpen, onClose, onStatusUpdated }) => {
           )}
         </div>
 
+        {/* URL Analysis Section */}
+        {incident.urls && incident.urls.length > 0 && (
+          <div style={{ marginTop: '24px' }}>
+            <h4 style={{
+              fontSize: '0.75rem',
+              fontWeight: 700,
+              textTransform: 'uppercase',
+              letterSpacing: '0.1em',
+              color: 'var(--text-muted)',
+              marginBottom: '12px',
+            }}>
+              URL Analysis ({incident.urls.length} URL{incident.urls.length !== 1 ? 's' : ''})
+            </h4>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {incident.urls.map((url, i) => {
+                const urlColor = url.classification === 'MALICIOUS' ? '#ef4444' :
+                  url.classification === 'SUSPICIOUS' ? '#f97316' : '#22c55e';
+                return (
+                  <div key={i} style={{
+                    padding: '10px 12px',
+                    background: 'rgba(15, 23, 42, 0.4)',
+                    borderLeft: `3px solid ${urlColor}`,
+                    borderRadius: '6px',
+                    fontSize: '0.78rem',
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontFamily: "'SF Mono', monospace", color: '#e2e8f0', wordBreak: 'break-all', maxWidth: '70%' }}>
+                        {(url.original_url || url.normalized_url || '').substring(0, 60)}{(url.original_url || '').length > 60 ? '…' : ''}
+                      </span>
+                      <span style={{
+                        fontSize: '0.65rem', padding: '2px 8px', borderRadius: '999px', fontWeight: 700,
+                        background: `${urlColor}15`, color: urlColor, border: `1px solid ${urlColor}30`,
+                      }}>
+                        {url.classification} ({url.risk_score || 0})
+                      </span>
+                    </div>
+                    {url.detections && url.detections.length > 0 && (
+                      <div style={{ marginTop: '6px', color: 'var(--text-muted)', fontSize: '0.72rem' }}>
+                        {url.detections.slice(0, 2).map((d, j) => (
+                          <div key={j}>• {d.explanation || d.signal}</div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Real Triage Actions */}
         <div style={{ marginTop: '24px' }}>
           <h4 style={{
@@ -288,53 +338,10 @@ const SOCDetailDrawer = ({ incident, isOpen, onClose, onStatusUpdated }) => {
           <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
             <button
               disabled={updating}
-              onClick={() => handleUpdateStatus('escalated')}
-              style={{
-                flex: 1,
-                minWidth: '160px',
-                background: 'linear-gradient(135deg, #a855f7, #6366f1)',
-                color: 'white',
-                border: 'none',
-                padding: '12px 20px',
-                borderRadius: 'var(--radius-md)',
-                cursor: updating ? 'not-allowed' : 'pointer',
-                fontWeight: 700,
-                fontFamily: 'var(--font-family)',
-                fontSize: '0.85rem',
-                transition: 'all 0.2s ease',
-                boxShadow: '0 4px 14px rgba(168, 85, 247, 0.25)',
-                opacity: updating ? 0.6 : 1,
-              }}
-            >
-              {updating ? 'Updating...' : '⚡ Escalate to Tier 2'}
-            </button>
-
-            <button
-              disabled={updating}
-              onClick={() => handleUpdateStatus('false_positive')}
-              style={{
-                flex: 1,
-                minWidth: '160px',
-                background: 'rgba(255, 255, 255, 0.05)',
-                border: '1px solid var(--panel-border)',
-                color: 'var(--text-secondary)',
-                padding: '12px 20px',
-                borderRadius: 'var(--radius-md)',
-                cursor: updating ? 'not-allowed' : 'pointer',
-                fontFamily: 'var(--font-family)',
-                fontSize: '0.85rem',
-                fontWeight: 600,
-                transition: 'all 0.2s ease',
-                opacity: updating ? 0.6 : 1,
-              }}
-            >
-              {updating ? 'Updating...' : 'Mark as False Positive'}
-            </button>
-
-            <button
-              disabled={updating}
               onClick={() => handleUpdateStatus('closed')}
               style={{
+                flex: 1,
+                minWidth: '120px',
                 background: 'rgba(34, 197, 94, 0.1)',
                 border: '1px solid rgba(34, 197, 94, 0.3)',
                 color: '#86efac',
@@ -346,10 +353,80 @@ const SOCDetailDrawer = ({ incident, isOpen, onClose, onStatusUpdated }) => {
                 fontWeight: 600,
                 transition: 'all 0.2s ease',
                 opacity: updating ? 0.6 : 1,
+                textAlign: 'center',
               }}
               title="Close and resolve incident"
             >
-              ✓ Close
+              {updating ? 'Updating...' : '✓ Close Incident'}
+            </button>
+
+            <button
+              disabled={updating}
+              onClick={() => {
+                const id = incident.numeric_id || parseInt(String(incident.id).replace(/\D/g, ''), 10);
+                window.open(`/api/incidents/${id}/report`, '_blank');
+              }}
+              style={{
+                flex: 1,
+                minWidth: '120px',
+                background: 'rgba(99, 102, 241, 0.1)',
+                border: '1px solid rgba(99, 102, 241, 0.3)',
+                color: '#c7d2fe',
+                padding: '12px 18px',
+                borderRadius: 'var(--radius-md)',
+                cursor: 'pointer',
+                fontFamily: 'var(--font-family)',
+                fontSize: '0.85rem',
+                fontWeight: 600,
+                transition: 'all 0.2s ease',
+                textAlign: 'center',
+              }}
+              title="Download threat analysis report"
+            >
+              📥 Download Report
+            </button>
+
+            <button
+              disabled={updating}
+              onClick={async () => {
+                if (!window.confirm("Are you sure you want to delete this incident and its email analysis permanently?")) return;
+                setUpdating(true);
+                try {
+                  const incidentId = incident.numeric_id || parseInt(String(incident.id).replace(/\D/g, ''), 10);
+                  const res = await fetch(`/api/incidents/${incidentId}`, { method: 'DELETE' });
+                  if (res.ok) {
+                    setToastMessage('Incident deleted successfully!');
+                    if (onStatusUpdated) onStatusUpdated({ id: incident.id, isDeleted: true });
+                    setTimeout(onClose, 1000);
+                  } else {
+                    const errData = await res.json();
+                    setToastMessage(`Error: ${errData.detail || 'Failed to delete'}`);
+                  }
+                } catch (err) {
+                  setToastMessage('Network error deleting incident');
+                } finally {
+                  setUpdating(false);
+                }
+              }}
+              style={{
+                flex: 1,
+                minWidth: '120px',
+                background: 'rgba(239, 68, 68, 0.1)',
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+                color: '#fca5a5',
+                padding: '12px 18px',
+                borderRadius: 'var(--radius-md)',
+                cursor: updating ? 'not-allowed' : 'pointer',
+                fontFamily: 'var(--font-family)',
+                fontSize: '0.85rem',
+                fontWeight: 600,
+                transition: 'all 0.2s ease',
+                opacity: updating ? 0.6 : 1,
+                textAlign: 'center',
+              }}
+              title="Permanently delete incident"
+            >
+              {updating ? 'Processing...' : '🗑️ Delete Incident'}
             </button>
           </div>
         </div>
