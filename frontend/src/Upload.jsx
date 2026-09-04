@@ -205,7 +205,7 @@ export default function Upload({ onResult }) {
               gap: '8px',
             }}
           >
-            <span>✍️</span> Direct Text / Paste Email
+            Direct Text / Paste Email
           </button>
         </div>
 
@@ -308,7 +308,7 @@ export default function Upload({ onResult }) {
                   fontWeight: 600,
                 }}
               >
-                🔴 Sample Phishing Email
+                Sample Phishing Email
               </button>
               <button
                 type="button"
@@ -459,7 +459,7 @@ export default function Upload({ onResult }) {
 
         {error && (
           <div className="user-error" role="alert">
-            <span>⚠️</span>
+            <span style={{ color: '#ef4444' }}>●</span>
             <span>{error}</span>
           </div>
         )}

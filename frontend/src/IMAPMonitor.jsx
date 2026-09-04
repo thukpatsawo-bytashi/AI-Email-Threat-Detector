@@ -375,7 +375,7 @@ const IMAPMonitor = () => {
               color: 'var(--text-secondary)',
               lineHeight: 1.6,
             }}>
-              <strong style={{ color: 'var(--text-primary)' }}>ℹ️ How it works:</strong>
+              <strong style={{ color: 'var(--text-primary)' }}>How it works:</strong>
               <br />
               The monitor connects to your IMAP server and polls for new emails at the
               configured interval. Each new email is automatically analyzed through the

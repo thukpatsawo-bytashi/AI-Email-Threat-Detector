@@ -223,10 +223,10 @@ const SOCIncidentQueue = ({ onIncidentUpdated }) => {
           onChange={(e) => setFilterSeverity(e.target.value)}
         >
           <option value="ALL">All Severities</option>
-          <option value="CRITICAL">🔴 Critical</option>
-          <option value="HIGH">🟠 High</option>
-          <option value="MEDIUM">🟡 Medium</option>
-          <option value="LOW">🟢 Low</option>
+          <option value="CRITICAL">Critical</option>
+          <option value="HIGH">High</option>
+          <option value="MEDIUM">Medium</option>
+          <option value="LOW">Low</option>
         </select>
         <button
           onClick={fetchIncidents}
@@ -259,7 +259,7 @@ const SOCIncidentQueue = ({ onIncidentUpdated }) => {
               fontWeight: 600,
             }}
           >
-            {bulkDeleting ? 'Deleting...' : `🗑️ Delete (${selectedIncidents.size})`}
+            {bulkDeleting ? 'Deleting...' : `Delete (${selectedIncidents.size})`}
           </button>
         )}
       </div>
@@ -306,7 +306,7 @@ const SOCIncidentQueue = ({ onIncidentUpdated }) => {
                   <td style={{ fontFamily: "'SF Mono', 'Fira Code', monospace", fontSize: '0.8rem', color: 'var(--text-secondary)', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{inc.sender}</td>
                   <td style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
                     {inc.geo && inc.geo.country && inc.geo.country !== 'Unknown'
-                      ? `📍 ${inc.geo.city && inc.geo.city !== 'Unknown' ? inc.geo.city + ', ' : ''}${inc.geo.country}`
+                      ? `${inc.geo.city && inc.geo.city !== 'Unknown' ? inc.geo.city + ', ' : ''}${inc.geo.country}`
                       : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                   </td>
                   <td style={{ maxWidth: '280px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{inc.subject}</td>
@@ -333,7 +333,7 @@ const SOCIncidentQueue = ({ onIncidentUpdated }) => {
         </table>
         {incidents.length === 0 && !loading && (
           <div style={{ padding: '56px 24px', textAlign: 'center', color: 'var(--text-muted)' }}>
-            <div style={{ fontSize: '2.5rem', marginBottom: '12px' }}>🛡️</div>
+            <div style={{ fontSize: '1.5rem', marginBottom: '12px', color: 'var(--accent-color)' }}>■</div>
             <div style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '6px' }}>
               {searchQuery || filterSeverity !== 'ALL' ? 'No incidents match your filter criteria.' : 'No security incidents logged yet.'}
             </div>
