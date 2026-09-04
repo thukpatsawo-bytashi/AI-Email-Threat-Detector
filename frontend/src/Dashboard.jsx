@@ -45,9 +45,9 @@ const Dashboard = () => {
   };
 
   const stats = [
-    { label: 'Active Incidents', value: summary.active_incidents, color: '#ef4444', icon: '🔴' },
-    { label: 'Emails Scanned', value: summary.emails_scanned, color: '#6366f1', icon: '📨' },
-    { label: 'Threat Rate', value: summary.threat_rate, color: '#f97316', icon: '🎯' },
+    { label: 'Active Incidents', value: summary.active_incidents, color: '#ef4444' },
+    { label: 'Emails Scanned', value: summary.emails_scanned, color: '#22c55e' },
+    { label: 'Threat Rate', value: summary.threat_rate, color: '#f97316' },
   ];
 
   return (
@@ -134,12 +134,7 @@ const Dashboard = () => {
                   {stat.value}
                 </div>
               </div>
-              <div style={{
-                fontSize: '1.5rem',
-                opacity: 0.8,
-              }}>
-                {stat.icon}
-              </div>
+
             </div>
           </div>
         ))}

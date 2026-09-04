@@ -40,7 +40,7 @@ const Sidebar = () => {
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: '22px', height: '22px', marginRight: '10px', flexShrink: 0 }}>
           <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
         </svg>
-        ThreatLens
+        Email Security
       </Link>
 
       <nav style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
@@ -83,7 +83,7 @@ const Sidebar = () => {
           width: '36px',
           height: '36px',
           borderRadius: '50%',
-          background: 'linear-gradient(135deg, #6366f1, #a78bfa)',
+          background: '#22c55e',
           flexShrink: 0,
           display: 'flex',
           alignItems: 'center',

@@ -383,7 +383,7 @@ const SOCDetailDrawer = ({ incident, isOpen, onClose, onStatusUpdated }) => {
               }}
               title="Download threat analysis report"
             >
-              📥 Download Report
+              Download Report
             </button>
 
             <button
@@ -426,7 +426,7 @@ const SOCDetailDrawer = ({ incident, isOpen, onClose, onStatusUpdated }) => {
               }}
               title="Permanently delete incident"
             >
-              {updating ? 'Processing...' : '🗑️ Delete Incident'}
+              {updating ? 'Processing...' : 'Delete Incident'}
             </button>
           </div>
         </div>

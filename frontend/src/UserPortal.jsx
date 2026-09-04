@@ -91,15 +91,15 @@ const ResultsView = ({ result, onReset, hideActions }) => {
             alignItems: 'center',
             gap: '8px',
             padding: '6px 14px',
-            background: 'rgba(99, 102, 241, 0.12)',
-            border: '1px solid rgba(99, 102, 241, 0.25)',
+            background: 'rgba(34, 197, 94, 0.1)',
+            border: '1px solid rgba(34, 197, 94, 0.2)',
             borderRadius: '999px',
             fontSize: '0.8rem',
-            color: '#c7d2fe',
+            color: '#86efac',
           }}>
-            <span>🛡️</span>
+            <span>Alert</span>
             <span>Security Alert Logged: <strong>INC-{String(result.incident_id).padStart(4, '0')}</strong></span>
-            <Link to="/soc" style={{ color: '#a5b4fc', fontWeight: 600, textDecoration: 'underline', marginLeft: '4px' }}>
+            <Link to="/soc" style={{ color: '#86efac', fontWeight: 600, textDecoration: 'underline', marginLeft: '4px' }}>
               View in SOC →
             </Link>
           </div>
@@ -165,7 +165,7 @@ const ResultsView = ({ result, onReset, hideActions }) => {
           <ul className="user-reasons">
             {result.reasons.map((reason, i) => (
               <li key={i}>
-                <span className="user-reason-icon">⚠️</span>
+                <span className="user-reason-icon" style={{ color: '#ef4444' }}>●</span>
                 <span>{reason}</span>
               </li>
             ))}
@@ -224,7 +224,7 @@ const ResultsView = ({ result, onReset, hideActions }) => {
             <div>
               <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>Location</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '1.05rem', color: '#f8fafc', fontWeight: 500 }}>
-                <span>📍</span>
+                <span style={{ color: 'var(--accent-color)' }}>●</span>
                 {result.geo.city && result.geo.city !== 'Unknown' ? `${result.geo.city}, ` : ''}{result.geo.country || 'Unknown'}
               </div>
             </div>
@@ -335,7 +335,7 @@ const ResultsView = ({ result, onReset, hideActions }) => {
       {!hideActions && (
         <div className="user-actions">
           <button className="user-btn-primary" onClick={onReset}>
-            🔍  Scan Another Email
+            Scan Another Email
           </button>
           <button
             className="user-btn-secondary"
@@ -347,7 +347,7 @@ const ResultsView = ({ result, onReset, hideActions }) => {
             }}
             style={{ display: result.incident_id || result.numeric_id || result.email_id ? undefined : 'none' }}
           >
-            📥 Download Report
+            Download Report
           </button>
           <Link to="/soc" className="user-btn-secondary">
             Open SOC Dashboard →
@@ -373,7 +373,7 @@ const MultiResultsView = ({ results, onReset }) => {
         </div>
         <div style={{ display: 'flex', gap: '12px' }}>
           <button className="user-btn-primary" onClick={onReset} style={{ padding: '10px 18px', fontSize: '0.85rem' }}>
-            🔍 Scan More
+            Scan More
           </button>
           <Link to="/soc" className="user-btn-secondary" style={{ padding: '10px 18px', fontSize: '0.85rem' }}>
             SOC Dashboard →
@@ -481,7 +481,7 @@ const UserPortal = () => {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: '28px', height: '28px' }}>
             <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
           </svg>
-          <span>ThreatLens</span>
+          <span>Email Security</span>
         </div>
         <Link to="/soc" className="user-soc-link">
           SOC Dashboard →
@@ -491,19 +491,19 @@ const UserPortal = () => {
       {!results || results.length === 0 ? (
         <div className="user-upload-section" style={{ animation: 'fadeInUp 0.6s ease' }}>
           <div className="user-hero-text">
-            <h1 className="user-title">AI Email Threat Detector</h1>
+            <h1 className="user-title">Email Threat Analysis</h1>
             <p className="user-subtitle">
-              Upload suspicious <strong>.eml</strong> files and get an instant AI-powered threat analysis
-              with phishing detection, header authentication, IP reputation, and URL scanning.
+              Upload suspicious <strong>.eml</strong> files for comprehensive threat analysis
+              including phishing detection, header authentication, IP reputation, and URL scanning.
             </p>
           </div>
           <Upload onResult={setResults} />
           <div className="user-features">
             {[
-              { icon: '🧠', title: 'NLP Analysis', desc: 'ML-based phishing detection' },
-              { icon: '🔐', title: 'Auth Check', desc: 'SPF, DKIM & DMARC validation' },
-              { icon: '🌐', title: 'IP Intel', desc: 'Geo & reputation lookup' },
-              { icon: '🔗', title: 'URL Scan', desc: 'Malicious link detection' },
+              { icon: 'NLP', title: 'Content Analysis', desc: 'Phishing pattern detection' },
+              { icon: 'AUTH', title: 'Auth Check', desc: 'SPF, DKIM & DMARC validation' },
+              { icon: 'IP', title: 'IP Intel', desc: 'Geo & reputation lookup' },
+              { icon: 'URL', title: 'URL Scan', desc: 'Malicious link detection' },
             ].map(f => (
               <div key={f.title} className="user-feature-card">
                 <div className="user-feature-icon">{f.icon}</div>
@@ -518,7 +518,7 @@ const UserPortal = () => {
       )}
 
       <footer className="user-footer">
-        <span>ThreatLens · AI Email Threat Detector</span>
+        <span>Email Threat Analysis Platform</span>
       </footer>
     </div>
   );
