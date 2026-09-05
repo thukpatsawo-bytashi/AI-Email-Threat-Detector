@@ -275,16 +275,16 @@ def analyze_intent_patterns(body_text: str) -> dict:
       - matched_intents: list of human-readable intent labels
       - intent_count: number of distinct intent patterns matched
     """
-    body_lower = body_text.lower()
-    matched = []
-    total_score = 0
+text = body_text or ""
+matched = []
+total_score = 0
 
-    seen_labels = set()
-    for pattern, weight, label in INTENT_PATTERNS:
-        if re.search(pattern, body_lower) and label not in seen_labels:
-            matched.append(label)
-            total_score += weight
-            seen_labels.add(label)
+seen_labels = set()
+for pattern, weight, label in INTENT_PATTERNS:
+    if re.search(pattern, text, flags=re.IGNORECASE) and label not in seen_labels:
+        matched.append(label)
+        total_score += weight
+        seen_labels.add(label)
 
     # Co-occurrence amplifier: multiple intent signals compound suspicion
     if len(matched) >= 4:
