@@ -37,10 +37,7 @@ const Sidebar = () => {
   return (
     <div className="sidebar">
       <Link to="/" className="sidebar-title" style={{ textDecoration: 'none' }}>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: '22px', height: '22px', marginRight: '10px', flexShrink: 0 }}>
-          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-        </svg>
-        Email Security
+        Dashboard
       </Link>
 
       <nav style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
@@ -69,51 +66,7 @@ const Sidebar = () => {
         </div>
       </nav>
 
-      <div style={{
-        marginTop: 'auto',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '12px',
-        padding: '16px',
-        background: 'rgba(255, 255, 255, 0.03)',
-        borderRadius: 'var(--radius-md)',
-        border: '1px solid var(--panel-border)',
-      }}>
-        <div style={{
-          width: '36px',
-          height: '36px',
-          borderRadius: '50%',
-          background: '#22c55e',
-          flexShrink: 0,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontSize: '0.9rem',
-          fontWeight: 700,
-          color: 'white',
-        }}>
-          SA
-        </div>
-        <div>
-          <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>SOC Analyst</div>
-          <div style={{
-            fontSize: '0.72rem',
-            color: '#86efac',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '4px',
-          }}>
-            <span style={{
-              width: '6px',
-              height: '6px',
-              borderRadius: '50%',
-              background: '#22c55e',
-              display: 'inline-block',
-            }} />
-            Online
-          </div>
-        </div>
-      </div>
+
     </div>
   );
 };

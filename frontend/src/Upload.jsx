@@ -324,7 +324,7 @@ export default function Upload({ onResult }) {
                   fontWeight: 600,
                 }}
               >
-                🟢 Sample Legitimate Email
+                Sample Legitimate Email
               </button>
               <button
                 type="button"
@@ -442,7 +442,7 @@ export default function Upload({ onResult }) {
               {loading ? (
                 <>
                   <span className="user-spinner" />
-                  Running AI Threat Analysis…
+                  Running Analysis…
                 </>
               ) : (
                 <>
