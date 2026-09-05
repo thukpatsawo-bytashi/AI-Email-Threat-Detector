@@ -42,7 +42,7 @@ INTENT_PATTERNS = [
     (r'\b(?:deadline|expires?|expiring)\b.*\b(?:today|tonight|tomorrow|hours?|minutes?)\b', 30, "artificial deadline pressure"),
     (r'\b(?:today|tonight|tomorrow)\b.*\b(?:deadline|expires?|close[sd]?|end)\b', 30, "artificial deadline pressure"),
     (r'\bbefore\s+(?:the\s+)?(?:deadline|end\s+of\s+(?:day|business)|close\s+of\s+business|eod|eob)\b', 25, "end-of-day pressure"),
-    (r'\b(?:within|next)\s+\d+\s*(?:hour|minute|hr|min)', 25, "tight time constraint"),
+(r'\b(?:within|next)\s+\d+\s*(?:hours?|minutes?|hrs?|mins?)\b', 25, "tight time constraint"),
     (r'\b(?:window|period)\s+closes?\b', 20, "closing window pressure"),
     (r'\bremain(?:s)?\s+(?:temporarily\s+)?restricted\b', 25, "restriction threat"),
 
