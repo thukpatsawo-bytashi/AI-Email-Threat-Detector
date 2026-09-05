@@ -162,14 +162,50 @@ const ResultsView = ({ result, onReset, hideActions }) => {
       {result.reasons && result.reasons.length > 0 && (
         <div className="user-card">
           <h3 className="user-card-title">Key Findings</h3>
-          <ul className="user-reasons">
-            {result.reasons.map((reason, i) => (
-              <li key={i}>
-                <span className="user-reason-icon" style={{ color: '#ef4444' }}>●</span>
-                <span>{reason}</span>
-              </li>
-            ))}
-          </ul>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {result.reasons.map((reason, idx) => {
+              const isDict = typeof reason === 'object' && reason !== null;
+              const severity = isDict ? (reason.severity || 'LOW') : 'MEDIUM';
+              const message = isDict ? (reason.message || '') : reason;
+              const category = isDict ? (reason.category || 'General') : 'General';
+              
+              const sevColor = severity === 'CRITICAL' ? '#ef4444' :
+                               severity === 'HIGH' ? '#f97316' :
+                               severity === 'MEDIUM' ? '#eab308' : '#22c55e';
+                               
+              return (
+                <div key={idx} style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '12px',
+                  padding: '10px 14px',
+                  background: `${sevColor}10`,
+                  borderLeft: `3px solid ${sevColor}`,
+                  borderRadius: '0 6px 6px 0',
+                  fontSize: '0.85rem'
+                }}>
+                  <span style={{
+                    fontSize: '0.65rem',
+                    fontWeight: 700,
+                    textTransform: 'uppercase',
+                    padding: '2px 6px',
+                    background: `${sevColor}25`,
+                    color: sevColor,
+                    borderRadius: '4px',
+                    letterSpacing: '0.5px',
+                    marginTop: '2px',
+                    minWidth: '55px',
+                    textAlign: 'center'
+                  }}>
+                    {category}
+                  </span>
+                  <span style={{ color: 'var(--text-primary)', lineHeight: '1.4' }}>
+                    {message}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 

@@ -18,7 +18,7 @@ from backend.ingestion.processor import (
 # ----------------------------------------
 
 ENV_PATH = (
-    Path(__file__).resolve().parent
+    Path(__file__).resolve().parents[1]
     / ".env"
 )
 

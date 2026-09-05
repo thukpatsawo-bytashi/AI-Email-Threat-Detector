@@ -36,7 +36,7 @@ const Dashboard = () => {
 
   useEffect(() => {
     fetchSummary();
-    const interval = setInterval(fetchSummary, 15000); // Polling every 15s
+    const interval = setInterval(fetchSummary, 2000); // Polling every 2s for near real-time updates
     return () => clearInterval(interval);
   }, [fetchSummary, refreshTrigger]);
 
