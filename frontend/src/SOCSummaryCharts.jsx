@@ -186,26 +186,25 @@ const SOCSummaryCharts = ({ refreshTrigger }) => {
           background: 'linear-gradient(90deg, transparent, #f97316, transparent)',
           opacity: 0.5,
         }} />
-        <h3 className="chart-title">Top Flagged Threat Terms</h3>
+        <h3 className="chart-title">Top Flagged Terms</h3>
         <div style={{ flex: 1, minHeight: 0 }}>
           {termsData.length === 0 ? (
-            <div style={{
-              height: '100%',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: 'var(--text-muted)',
-              fontSize: '0.85rem',
-              textAlign: 'center',
-              padding: '24px',
-            }}>
-              <span style={{ fontSize: '2rem', marginBottom: '8px' }}>📊</span>
-              <div>No threat indicators logged yet.</div>
-              <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
-                Analyze an email above to generate live threat keyword metrics.
+              <div style={{
+                height: '100%',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'var(--text-muted)',
+                fontSize: '0.85rem',
+                textAlign: 'center',
+                padding: '24px',
+              }}>
+                <div>No indicators logged yet.</div>
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                  Analyze an email above to generate live keyword metrics.
+                </div>
               </div>
-            </div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={termsData} layout="vertical" margin={{ top: 10, right: 20, left: 20, bottom: 0 }}>

@@ -97,7 +97,7 @@ const IMAPMonitor = () => {
         <div>
           <h1 className="dashboard-title">Live Email Monitor</h1>
           <p style={{ color: 'var(--text-secondary)', marginTop: '6px', fontSize: '0.92rem' }}>
-            Connect to your IMAP inbox for real-time email threat analysis
+            Connect to your IMAP inbox for real-time email analysis
           </p>
         </div>
         <div style={{
@@ -302,8 +302,17 @@ const IMAPMonitor = () => {
               borderRadius: '12px',
               textAlign: 'center',
             }}>
-              <div style={{ fontSize: '2.5rem', marginBottom: '8px' }}>
-                {status.active ? '📡' : '📴'}
+              <div style={{ fontSize: '2.5rem', marginBottom: '8px', color: status.active ? '#86efac' : 'var(--text-muted)' }}>
+                {status.active ? (
+                  <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+                  </svg>
+                ) : (
+                  <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
+                  </svg>
+                )}
               </div>
               <div style={{
                 fontSize: '1.1rem',
@@ -379,7 +388,7 @@ const IMAPMonitor = () => {
               <br />
               The monitor connects to your IMAP server and polls for new emails at the
               configured interval. Each new email is automatically analyzed through the
-              full threat detection pipeline and appears in the SOC Dashboard incident queue in real time.
+              full detection pipeline and appears in the Dashboard incident queue in real time.
               <br /><br />
               <strong>Gmail users:</strong> Use an App Password (not your regular password).
               Enable "Less secure app access" or generate an App Password in Google Account settings.

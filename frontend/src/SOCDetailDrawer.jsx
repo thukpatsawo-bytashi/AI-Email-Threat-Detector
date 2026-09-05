@@ -381,7 +381,7 @@ const SOCDetailDrawer = ({ incident, isOpen, onClose, onStatusUpdated }) => {
                 transition: 'all 0.2s ease',
                 textAlign: 'center',
               }}
-              title="Download threat analysis report"
+              title="Download analysis report"
             >
               Download Report
             </button>

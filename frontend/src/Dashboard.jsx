@@ -6,7 +6,7 @@ const Dashboard = () => {
   const [summary, setSummary] = useState({
     active_incidents: '0',
     emails_scanned: '0',
-    threat_rate: '0.0%',
+    detection_rate: '0.0%',
   });
   const [loading, setLoading] = useState(true);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
@@ -24,7 +24,7 @@ const Dashboard = () => {
         setSummary({
           active_incidents: String(data.active_incidents ?? 0),
           emails_scanned: Number(data.emails_scanned ?? 0).toLocaleString(),
-          threat_rate: String(data.threat_rate || '0.0%'),
+          detection_rate: String(data.threat_rate || '0.0%'),
         });
       }
     } catch (err) {
@@ -47,7 +47,7 @@ const Dashboard = () => {
   const stats = [
     { label: 'Active Incidents', value: summary.active_incidents, color: '#ef4444' },
     { label: 'Emails Scanned', value: summary.emails_scanned, color: '#22c55e' },
-    { label: 'Threat Rate', value: summary.threat_rate, color: '#f97316' },
+    { label: 'Detection Rate', value: summary.detection_rate, color: '#f97316' },
   ];
 
   return (
@@ -56,7 +56,7 @@ const Dashboard = () => {
         <div>
           <h1 className="dashboard-title">SOC Dashboard</h1>
           <p style={{ color: 'var(--text-secondary)', marginTop: '6px', fontSize: '0.92rem' }}>
-            Real-time threat monitoring, pipeline triage, and incident lifecycle
+            Real-time monitoring, pipeline triage, and incident lifecycle
           </p>
         </div>
         <div style={{

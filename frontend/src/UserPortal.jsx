@@ -478,10 +478,7 @@ const UserPortal = () => {
 
       <header className="user-header">
         <div className="user-logo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: '28px', height: '28px' }}>
-            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-          </svg>
-          <span>Email Security</span>
+          {/* Logo removed */}
         </div>
         <Link to="/soc" className="user-soc-link">
           SOC Dashboard →
@@ -491,10 +488,10 @@ const UserPortal = () => {
       {!results || results.length === 0 ? (
         <div className="user-upload-section" style={{ animation: 'fadeInUp 0.6s ease' }}>
           <div className="user-hero-text">
-            <h1 className="user-title">Email Threat Analysis</h1>
+            <h1 className="user-title">Email Analysis</h1>
             <p className="user-subtitle">
-              Upload suspicious <strong>.eml</strong> files for comprehensive threat analysis
-              including phishing detection, header authentication, IP reputation, and URL scanning.
+              Upload <strong>.eml</strong> files for comprehensive analysis
+              including content inspection, header authentication, IP reputation, and URL scanning.
             </p>
           </div>
           <Upload onResult={setResults} />
@@ -518,7 +515,7 @@ const UserPortal = () => {
       )}
 
       <footer className="user-footer">
-        <span>Email Threat Analysis Platform</span>
+        <span></span>
       </footer>
     </div>
   );
