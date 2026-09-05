@@ -99,6 +99,8 @@ HEURISTIC_WEIGHTS = {
     "account locked": 40,
     "action required": 30,
     "within 24 hours": 35,
+    "within the next 48 hours": 35,
+    "48 hours": 30,
     "permanent deletion": 40,
     "unauthorized access": 35,
     "security alert": 30,
@@ -106,11 +108,15 @@ HEURISTIC_WEIGHTS = {
 
     # Credential Harvesting & Account Bait
     "verify your account": 45,
+    "verify your payment": 45,
+    "payment verification needed": 45,
+    "unable to verify": 40,
     "confirm your details": 40,
     "verify credentials": 45,
     "confirm your password": 50,
     "reset your password": 30,
     "update billing": 35,
+    "billing information": 35,
     "sign in to verify": 40,
     "login to continue": 30,
     "re-activate": 35,
@@ -120,6 +126,7 @@ HEURISTIC_WEIGHTS = {
     "outstanding invoice": 35,
     "overdue invoice": 35,
     "unusual transaction": 40,
+    "prevent interruption": 40,
     "crypto": 30,
     "bitcoin": 35,
     "gift card": 40,
@@ -134,6 +141,19 @@ HEURISTIC_WEIGHTS = {
     "download document": 25,
     "follow this link": 25,
     "access secure portal": 35,
+
+    # Modern Threats (Extortion, Gift Cards, Payroll)
+    "recorded you": 50,
+    "webcam": 40,
+    "bitcoin": 45,
+    "pay in bitcoin": 50,
+    "gift card": 45,
+    "apple gift card": 50,
+    "steam gift card": 50,
+    "direct deposit": 35,
+    "payroll update": 40,
+    "w2 form": 40,
+    "urgent wire transfer": 50,
 }
 
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "phishing_classifier_model.pkl")
@@ -321,6 +341,13 @@ def classify_heuristic(body_text: str) -> dict:
     keyword_score = sum(HEURISTIC_WEIGHTS.get(term, 10) for term in flagged)
     if len(flagged) >= 3:
         keyword_score = int(keyword_score * 1.25)
+    raw_score = sum(HEURISTIC_WEIGHTS.get(term, 10) for term in flagged)
+
+    # Multi-term co-occurrence multiplier
+    if len(flagged) >= 4:
+        raw_score = int(raw_score * 1.4)
+    elif len(flagged) >= 3:
+        raw_score = int(raw_score * 1.25)
     elif len(flagged) >= 2:
         keyword_score = int(keyword_score * 1.1)
 
@@ -338,7 +365,8 @@ def classify_heuristic(body_text: str) -> dict:
     if raw_score <= 0:
         phishing_prob = 2
     else:
-        phishing_prob = int(min(98, max(5, 100 / (1 + math.exp(-0.04 * (raw_score - 50))))))
+        # A more aggressive curve so strong signals break 85+ easily
+        phishing_prob = int(min(98, max(5, 100 / (1 + math.exp(-0.08 * (raw_score - 35))))))
 
     legit_prob = max(1, 100 - phishing_prob)
 

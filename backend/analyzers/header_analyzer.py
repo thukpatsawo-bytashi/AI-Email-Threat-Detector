@@ -15,8 +15,9 @@ import re
 import urllib.request
 import urllib.error
 import email.utils
-from datetime import datetime
+from datetime import datetime, timezone
 from functools import lru_cache
+import difflib
 
 
 
@@ -77,7 +78,7 @@ def get_domain_age_days(domain: str) -> int | None:
                     reg_date_str = event.get("eventDate")
                     if reg_date_str:
                         reg_date = datetime.strptime(reg_date_str[:10], "%Y-%m-%d")
-                        delta = datetime.utcnow() - reg_date
+                        delta = datetime.now(timezone.utc) - reg_date.replace(tzinfo=timezone.utc)
                         return max(0, delta.days)
     except Exception:
         # Graceful failure on timeout, rate limit, or invalid domain
@@ -86,13 +87,13 @@ def get_domain_age_days(domain: str) -> int | None:
     return None
 
 
-def detect_domain_lookalike(domain: str, display_name: str) -> tuple[bool, str | None]:
+def detect_domain_lookalike(domain: str, display_name: str) -> tuple[bool, str | None, str]:
     """
     Detects typosquatting, digit substitutions, brand impersonation,
-    or suspicious TLDs on a domain.
+    or suspicious TLDs on a domain. Returns (is_lookalike, reason_msg, severity).
     """
     if not domain:
-        return (False, None)
+        return (False, None, "LOW")
 
     domain_lower = domain.lower()
     parts = domain_lower.split(".")
@@ -101,9 +102,16 @@ def detect_domain_lookalike(domain: str, display_name: str) -> tuple[bool, str |
     # Heuristic 1: Brand name in subdomain (e.g. paypal.com.security-verify.xyz)
     for brand in TARGETED_BRANDS:
         if brand in domain_lower and not domain_lower.endswith(f"{brand}.com") and not domain_lower.endswith(f"{brand}.org"):
-            return (True, f"Brand '{brand}' detected in untrusted domain '{domain}'")
+            return (True, f"Brand '{brand}' detected in untrusted domain '{domain}'", "HIGH")
 
-    # Heuristic 2: Digit-for-letter substitution in base domain (paypa1, g00gle, micros0ft)
+    # Heuristic 2: Fuzzy matching / Typosquatting of base domain
+    # This catches "paypaal", "gogle", "microsft" via Levenshtein-like ratio
+    for brand in TARGETED_BRANDS:
+        similarity = difflib.SequenceMatcher(None, base_domain, brand).ratio()
+        if 0.8 <= similarity < 1.0:
+            return (True, f"Domain '{domain}' is highly similar to targeted brand '{brand}' (Typosquatting)", "CRITICAL")
+
+    # Heuristic 3: Digit-for-letter substitution in base domain (paypa1, g00gle, micros0ft)
     if re.search(r"[a-z]+[0-9]+[a-z]*|[a-z]*[0-9]+[a-z]+", base_domain):
         # Check if substituting numbers with letters resembles a targeted brand
         variants = {
@@ -112,23 +120,23 @@ def detect_domain_lookalike(domain: str, display_name: str) -> tuple[bool, str |
         }
         for brand in TARGETED_BRANDS:
             if any(brand in variant or brand == variant for variant in variants):
-                return (True, f"Typosquatting/homoglyph detected mimicking '{brand}' ({domain})")
-        return (True, f"Suspicious alphanumeric substitution in domain name ({domain})")
+                return (True, f"Typosquatting/homoglyph detected mimicking '{brand}' ({domain})", "CRITICAL")
+        return (True, f"Suspicious alphanumeric substitution in domain name ({domain})", "MEDIUM")
 
-    # Heuristic 3: Display name claims to be a brand, but sender domain does not match
+    # Heuristic 4: Display name claims to be a brand, but sender domain does not match
     if display_name:
         display_lower = display_name.lower()
         for brand in TARGETED_BRANDS:
             if brand in display_lower:
                 if not (domain_lower == f"{brand}.com" or domain_lower.endswith(f".{brand}.com")):
-                    return (True, f"Display name '{display_name}' impersonates '{brand}' but domain is '{domain}'")
+                    return (True, f"Display name '{display_name}' impersonates '{brand}' but domain is '{domain}'", "HIGH")
 
-    # Heuristic 4: Suspicious / Disposable / High-abuse TLDs
+    # Heuristic 5: Suspicious / Disposable / High-abuse TLDs
     for tld in SUSPICIOUS_TLDS:
         if domain_lower.endswith(tld):
-            return (True, f"Suspicious high-risk top-level domain ({tld})")
+            return (True, f"Suspicious high-risk top-level domain ({tld})", "MEDIUM")
 
-    return (False, None)
+    return (False, None, "LOW")
 
 
 def header_value(raw_headers: dict, header_name: str) -> str:
@@ -204,37 +212,65 @@ def analyze(parsed_email: dict) -> dict:
 
     if reply_domain and from_domain and reply_domain != from_domain:
         sender_reply_mismatch = True
-        anomalies.append(f"Sender identity mismatch: From ({from_domain}) vs Reply-To ({reply_domain})")
+        anomalies.append({
+            "category": "Identity",
+            "severity": "HIGH",
+            "message": f"Sender identity mismatch: From ({from_domain}) vs Reply-To ({reply_domain})"
+        })
         header_risk_score += 30
 
     if return_domain and from_domain and return_domain != from_domain:
         # Return-Path envelope mismatch
-        anomalies.append(f"Envelope sender mismatch: From ({from_domain}) vs Return-Path ({return_domain})")
+        anomalies.append({
+            "category": "Identity",
+            "severity": "MEDIUM",
+            "message": f"Envelope sender mismatch: From ({from_domain}) vs Return-Path ({return_domain})"
+        })
         header_risk_score += 15
 
     # 4. Domain Lookalike & Brand Impersonation
-    domain_lookalike, lookalike_reason = detect_domain_lookalike(from_domain, display_name)
+    domain_lookalike, lookalike_reason, lookalike_severity = detect_domain_lookalike(from_domain, display_name)
     if domain_lookalike:
-        anomalies.append(lookalike_reason or "Domain lookalike detected (suspicious TLD or typosquatting)")
+        anomalies.append({
+            "category": "Domain",
+            "severity": lookalike_severity,
+            "message": lookalike_reason or "Domain lookalike detected (suspicious TLD or typosquatting)"
+        })
         header_risk_score += 40
 
     # 5. Domain Age Lookup
     domain_age_days = get_domain_age_days(from_domain) if from_domain else None
     if domain_age_days is not None and domain_age_days < 30:
-        anomalies.append(f"Newly registered domain (only {domain_age_days} day{'s' if domain_age_days != 1 else ''} old)")
+        anomalies.append({
+            "category": "Domain",
+            "severity": "HIGH",
+            "message": f"Newly registered domain (only {domain_age_days} day{'s' if domain_age_days != 1 else ''} old)"
+        })
         header_risk_score += 30
 
     # 6. Authentication Failures Scoring
     if spf in ("fail", "softfail"):
-        anomalies.append(f"SPF authentication failed ({spf})")
+        anomalies.append({
+            "category": "Authentication",
+            "severity": "HIGH",
+            "message": f"SPF authentication failed ({spf})"
+        })
         header_risk_score += 20
 
     if dkim == "fail":
-        anomalies.append("DKIM cryptographic signature verification failed")
+        anomalies.append({
+            "category": "Authentication",
+            "severity": "HIGH",
+            "message": "DKIM cryptographic signature verification failed"
+        })
         header_risk_score += 20
 
     if dmarc in ("fail", "softfail"):
-        anomalies.append("DMARC policy check failed")
+        anomalies.append({
+            "category": "Authentication",
+            "severity": "CRITICAL",
+            "message": f"DMARC policy check failed ({dmarc})"
+        })
         header_risk_score += 20
 
     # Cap score at 100
