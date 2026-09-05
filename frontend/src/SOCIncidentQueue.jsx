@@ -83,7 +83,7 @@ const SOCIncidentQueue = ({ onIncidentUpdated }) => {
 
   useEffect(() => {
     fetchIncidents();
-    const interval = setInterval(fetchIncidents, 10000); // Poll every 10s
+    const interval = setInterval(fetchIncidents, 2000); // Poll every 2s for near real-time updates
     return () => clearInterval(interval);
   }, [fetchIncidents]);
 

@@ -33,10 +33,10 @@ def test_full_flow():
 
     res = client.post(
         "/api/analyze",
-        files={"file": ("urgent_payroll.eml", sample_email, "message/rfc822")}
+        files={"files": ("urgent_payroll.eml", sample_email, "message/rfc822")}
     )
     assert res.status_code == 200
-    data = res.json()
+    data = res.json()[0]  # /api/analyze returns a list of results
     assert "risk_score" in data
     assert data["risk_score"] >= 30
     assert "incident_id" in data

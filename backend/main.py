@@ -172,6 +172,7 @@ def format_email_entry_for_frontend(email: AnalyzedEmail) -> dict[str, Any]:
         "raw_status": raw_status,
         "riskScore": email.risk_score,
         "explanation": explanation,
+        "detailed_reasons": reasons,
         "authStatus": auth_status,
         "threatIntel": threat_intel,
         "assigned_to": inc.assigned_to if inc else None,
@@ -256,7 +257,16 @@ def execute_analysis_pipeline(parsed: dict, filename: str, db: Session) -> dict[
 
     if risk_score >= 30 or classification in ("CRITICAL", "HIGH", "MEDIUM"):
         reasons = final_verdict.get("reasons", [])
-        primary_reason = reasons[0] if reasons else "Elevated email threat indicators detected"
+        
+        # Get the first reason and extract the string message if it's a dict
+        primary_reason = "Elevated email threat indicators detected"
+        if reasons:
+            first_reason = reasons[0]
+            if isinstance(first_reason, dict):
+                primary_reason = first_reason.get("message", primary_reason)
+            else:
+                primary_reason = str(first_reason)
+                
         incident = Incident(
             analyzed_email_id=analyzed_email.id,
             title=f"{classification} Threat: {(analyzed_email.subject or 'No Subject')[:75]}",
@@ -837,7 +847,7 @@ class IMAPConfig(BaseModel):
     email: str
     password: str
     folder: str = "INBOX"
-    interval: int = 30
+    interval: int = 15
 
 
 @app.post("/api/imap/start")

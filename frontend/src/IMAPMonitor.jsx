@@ -7,7 +7,7 @@ const IMAPMonitor = () => {
     email: '',
     password: '',
     folder: 'INBOX',
-    interval: 30,
+    interval: 5,
   });
   const [status, setStatus] = useState({
     active: false,
@@ -30,7 +30,7 @@ const IMAPMonitor = () => {
 
   useEffect(() => {
     fetchStatus();
-    const interval = setInterval(fetchStatus, 5000);
+    const interval = setInterval(fetchStatus, 2000);
     return () => clearInterval(interval);
   }, []);
 

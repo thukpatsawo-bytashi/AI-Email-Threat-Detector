@@ -86,18 +86,18 @@ def content_points(nlp_score: int, flagged_terms: list[str]) -> int:
     term_count = len(flagged_terms)
 
     if nlp_score >= 80:
-        base = 34
+        base = 40
     elif nlp_score >= 65:
-        base = 24
+        base = 30
     elif nlp_score >= 50:
-        base = 14 if term_count else 8
+        base = 20 if term_count else 12
     elif term_count >= 2:
-        base = 10
+        base = 15
     else:
         base = 0
 
-    term_bonus = min(14, term_count * 3)
-    return cap(base + term_bonus, 50)
+    term_bonus = min(20, term_count * 4)
+    return cap(base + term_bonus, 60)
 
 
 def network_points(ip_score: int) -> int:
@@ -111,15 +111,15 @@ def network_points(ip_score: int) -> int:
 
 
 def url_risk_points(url_score: int) -> int:
-    """Map aggregate URL phishing score (0-100) to risk engine points (0-20)."""
-    if url_score >= 70:
-        return 20
-    if url_score >= 50:
-        return 15
-    if url_score >= 30:
+    """Map aggregate URL phishing score (0-100) to risk engine points (0-30)."""
+    if url_score >= 80:
+        return 30
+    if url_score >= 60:
+        return 25
+    if url_score >= 40:
+        return 18
+    if url_score >= 20:
         return 10
-    if url_score >= 15:
-        return 5
     return 0
 
 
@@ -133,21 +133,21 @@ def synergy_points(
 ) -> int:
     points = 0
     if content >= 30 and authentication >= 15:
-        points += 8
+        points += 10
     if content >= 25 and domain >= 15:
-        points += 8
+        points += 10
     if content >= 20 and identity >= 10:
-        points += 5
+        points += 8
     if domain >= 15 and authentication >= 15:
-        points += 5
+        points += 8
     if network >= 10 and (authentication >= 15 or domain >= 15):
-        points += 4
+        points += 6
     # URL synergy: phishing URLs corroborated by content or auth failures
     if url >= 10 and content >= 15:
-        points += 6
+        points += 10
     if url >= 10 and (authentication >= 15 or domain >= 15):
-        points += 4
-    return cap(points, 25)
+        points += 8
+    return cap(points, 35)
 
 
 def classify_risk(risk_score: int) -> str:
@@ -199,7 +199,8 @@ def compute(
     dmarc = normalize_status(header_result.get("dmarc"))
     auth_statuses = [spf, dkim, dmarc]
 
-    anomalies = [str(a) for a in as_list(header_result.get("anomalies", []))]
+    # Header anomalies are now structured dicts, so keep them as-is
+    anomalies = as_list(header_result.get("anomalies", []))
     flagged_terms = [str(t) for t in as_list(nlp_result.get("flagged_terms", []))]
 
     content = content_points(nlp_score, flagged_terms)
@@ -257,52 +258,58 @@ def compute(
 
     reasons = []
 
-    def add_reason(reason_text: str):
-        if reason_text and reason_text not in reasons:
-            reasons.append(reason_text)
+    def add_reason(category: str, severity: str, message: str):
+        # Prevent duplicates
+        if not any(r["message"] == message for r in reasons):
+            reasons.append({"category": category, "severity": severity, "message": message})
 
     def has_reason_token(token: str) -> bool:
-        return any(token.lower() in reason.lower() for reason in reasons)
+        return any(token.lower() in r["message"].lower() for r in reasons)
 
+    # Add all structured anomalies from the header analyzer
     for anomaly in anomalies:
-        add_reason(anomaly)
+        if isinstance(anomaly, dict):
+            add_reason(anomaly.get("category", "Header"), anomaly.get("severity", "MEDIUM"), anomaly.get("message", ""))
+        else:
+            add_reason("Header", "MEDIUM", str(anomaly))
 
     if spf in AUTH_FAILURE_WEIGHTS["spf"] and not has_reason_token("spf"):
-        add_reason(f"SPF authentication failed ({spf})")
+        add_reason("Authentication", "HIGH", f"SPF authentication failed ({spf})")
     if dkim in AUTH_FAILURE_WEIGHTS["dkim"] and not has_reason_token("dkim"):
-        add_reason("DKIM signature verification failed")
+        add_reason("Authentication", "HIGH", "DKIM signature verification failed")
     if dmarc in AUTH_FAILURE_WEIGHTS["dmarc"] and not has_reason_token("dmarc"):
-        add_reason(f"DMARC policy check failed ({dmarc})")
+        add_reason("Authentication", "CRITICAL", f"DMARC policy check failed ({dmarc})")
 
     if content >= 30:
         terms = f": {', '.join(flagged_terms[:4])}" if flagged_terms else ""
-        add_reason(f"Strong phishing-language evidence ({nlp_score}%){terms}")
+        add_reason("Content", "CRITICAL", f"Strong phishing-language evidence ({nlp_score}%){terms}")
     elif content >= 15:
         terms = f": {', '.join(flagged_terms[:3])}" if flagged_terms else ""
-        add_reason(f"Possible phishing language ({nlp_score}%){terms}")
+        add_reason("Content", "HIGH", f"Possible phishing language ({nlp_score}%){terms}")
 
     if network >= 8:
         primary_ip = ip_result.get("primary_ip")
         isp = str(ip_result.get("geo", {}).get("isp", "Unknown"))
-        add_reason(f"Risky sending network ({primary_ip or 'unknown'}) associated with {isp}")
+        add_reason("Network", "HIGH", f"Risky sending network ({primary_ip or 'unknown'}) associated with {isp}")
 
     # URL evidence
     if url >= 5:
         url_evidence = url_data.get("url_evidence", [])
         for ev in url_evidence[:3]:
-            add_reason(str(ev))
+            # URLs can return strings, map them to a dict
+            add_reason("URL", "HIGH", str(ev))
         mal_count = int(url_data.get("malicious_url_count", 0) or 0)
         sus_count = int(url_data.get("suspicious_url_count", 0) or 0)
         if mal_count and not has_reason_token("malicious url"):
-            add_reason(f"{mal_count} malicious URL(s) detected in email body")
+            add_reason("URL", "CRITICAL", f"{mal_count} malicious URL(s) detected in email body")
         elif sus_count and not has_reason_token("suspicious url"):
-            add_reason(f"{sus_count} suspicious URL(s) detected in email body")
+            add_reason("URL", "HIGH", f"{sus_count} suspicious URL(s) detected in email body")
 
     if not reasons:
         if auth_passes >= 2 and nlp_score < 50 and ip_score < 35:
-            add_reason("No strong malicious evidence found; authentication and content signals look benign")
+            add_reason("Safe", "LOW", "No strong malicious evidence found; authentication and content signals look benign")
         else:
-            add_reason("No strong malicious evidence found")
+            add_reason("Safe", "LOW", "No strong malicious evidence found")
 
     if risk_score <= 30:
         evidence_level = "LOW"

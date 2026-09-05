@@ -95,25 +95,33 @@ class IMAPMonitor:
 
     def _poll_loop(self, analysis_callback):
         """Main polling loop that checks for new emails."""
-        interval = int(self._config.get("interval", 30))
+        interval = int(self._config.get("interval", 5))
         folder = self._config.get("folder", "INBOX")
+        first_poll = True
 
         while not self._stop_event.is_set():
             try:
                 conn = self._connect()
                 conn.select(folder, readonly=True)
 
-                # Search for all emails (or UNSEEN for unread only)
                 status, data = conn.search(None, "ALL")
                 if status == "OK" and data[0]:
                     uids = data[0].split()
-                    # Only process new UIDs
+
+                    if first_poll:
+                        # On the very first poll, mark all but the latest 10 as
+                        # already seen so we don't pull the entire inbox.
+                        if len(uids) > 10:
+                            already_seen = uids[:-10]
+                            for uid in already_seen:
+                                self._seen_uids.add(uid.decode())
+                        first_poll = False
+
+                    # Only process UIDs we haven't seen yet
                     new_uids = [uid for uid in uids if uid.decode() not in self._seen_uids]
 
-                    for uid in new_uids[-10:]:  # Process max 10 new emails per cycle
+                    for uid in new_uids:
                         uid_str = uid.decode()
-                        if uid_str in self._seen_uids:
-                            continue
 
                         try:
                             status, msg_data = conn.fetch(uid, "(RFC822)")
