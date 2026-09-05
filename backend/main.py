@@ -18,7 +18,14 @@ import traceback
 from typing import Any
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
+from io import BytesIO
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_CENTER
+from reportlab.lib.units import mm
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -436,65 +443,172 @@ def get_incident(item_id: int, db: Session = Depends(get_db)):
 
 @app.get("/api/incidents/{item_id}/report")
 def download_incident_report(item_id: int, db: Session = Depends(get_db)):
-    """
-    Generates a downloadable JSON threat analysis report for an incident.
-    """
+    """Generate a downloadable PDF threat analysis report."""
     email = db.query(AnalyzedEmail).filter(AnalyzedEmail.id == item_id).first()
     if not email:
         incident = db.query(Incident).filter(Incident.id == item_id).first()
         if incident and incident.analyzed_email:
             email = incident.analyzed_email
-    
+
     if not email:
         raise HTTPException(status_code=404, detail="Incident not found")
 
     res = email.analysis_result or {}
     inc = email.incidents[0] if email.incidents else None
 
-    report = {
-        "report_title": "AI Email Threat Analysis Report",
-        "generated_at": utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
-        "summary": {
-            "risk_score": email.risk_score,
-            "classification": email.classification,
-            "evidence_level": email.evidence_level,
-        },
-        "email_metadata": {
-            "from": email.sender,
-            "to": email.recipient,
-            "subject": email.subject,
-            "date_analyzed": email.created_at.strftime("%Y-%m-%d %H:%M:%S UTC"),
-        },
-        "authentication": {
-            "spf": res.get("spf", "N/A"),
-            "dkim": res.get("dkim", "N/A"),
-            "dmarc": res.get("dmarc", "N/A"),
-        },
-        "score_breakdown": {
-            "header_risk_score": email.header_risk_score,
-            "phishing_probability": email.phishing_probability,
-            "ip_risk_score": email.ip_risk_score,
-            "url_risk_score": email.url_risk_score,
-        },
-        "ip_intelligence": {
-            "primary_ip": res.get("primary_ip", ""),
-            "geo": res.get("geo", {}),
-            "reputation": res.get("reputation", {}),
-        },
-        "url_analysis": res.get("urls", []),
-        "key_findings": res.get("reasons", []),
-        "flagged_terms": res.get("flagged_terms", []),
-        "incident": {
-            "id": inc.id if inc else None,
-            "status": inc.status.value if inc else "N/A",
-            "severity": email.classification,
-        } if inc else None,
-    }
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=15 * mm,
+        leftMargin=15 * mm,
+        topMargin=15 * mm,
+        bottomMargin=15 * mm,
+        title="AI Email Threat Analysis Report",
+    )
 
-    return JSONResponse(
-        content=report,
+    styles = getSampleStyleSheet()
+    title = ParagraphStyle(
+        "ReportTitle", parent=styles["Title"],
+        alignment=TA_CENTER, fontSize=18, spaceAfter=6
+    )
+    subtitle = ParagraphStyle(
+        "Subtitle", parent=styles["Normal"],
+        alignment=TA_CENTER, fontSize=9, textColor=colors.grey, spaceAfter=14
+    )
+    section = ParagraphStyle(
+        "Section", parent=styles["Heading2"],
+        fontSize=12, spaceBefore=10, spaceAfter=6
+    )
+    body = ParagraphStyle(
+        "ReportBody", parent=styles["BodyText"],
+        fontSize=9, leading=12
+    )
+    small = ParagraphStyle(
+        "Small", parent=body, fontSize=8, leading=10
+    )
+
+    def val(x):
+        if x is None:
+            return "N/A"
+        return str(x).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    def para(x, style=body):
+        return Paragraph(val(x), style)
+
+    def add_table(rows, widths=(48 * mm, 132 * mm)):
+        t = Table(rows, colWidths=widths, repeatRows=1)
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E5E7EB")),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTNAME", (0, 1), (0, -1), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#D1D5DB")),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1),
+             [colors.white, colors.HexColor("#F9FAFB")]),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ]))
+        story.append(t)
+        story.append(Spacer(1, 5))
+
+    story = [
+        Paragraph("AI Email Threat Analysis Report", title),
+        Paragraph(
+            f"Generated: {val(utcnow().strftime('%Y-%m-%d %H:%M:%S UTC'))}",
+            subtitle
+        ),
+    ]
+
+    story.append(Paragraph("1. Threat Summary", section))
+    add_table([
+        [para("Field", small), para("Value", small)],
+        [para("Risk Score"), para(f"{email.risk_score}/100")],
+        [para("Classification"), para(email.classification)],
+        [para("Evidence Level"), para(email.evidence_level)],
+        [para("Incident ID"), para(f"INC-{inc.id:04d}" if inc else "N/A")],
+        [para("Incident Status"), para(inc.status.value if inc else "N/A")],
+    ])
+
+    story.append(Paragraph("2. Email Metadata", section))
+    add_table([
+        [para("Field", small), para("Value", small)],
+        [para("From"), para(email.sender)],
+        [para("To"), para(email.recipient)],
+        [para("Subject"), para(email.subject)],
+        [para("Date Analyzed"), para(email.created_at.strftime("%Y-%m-%d %H:%M:%S UTC"))],
+        [para("Filename"), para(email.filename)],
+    ])
+
+    story.append(Paragraph("3. Authentication Results", section))
+    add_table([
+        [para("Check", small), para("Result", small)],
+        [para("SPF"), para(res.get("spf", "N/A"))],
+        [para("DKIM"), para(res.get("dkim", "N/A"))],
+        [para("DMARC"), para(res.get("dmarc", "N/A"))],
+    ])
+
+    story.append(Paragraph("4. Risk Score Breakdown", section))
+    add_table([
+        [para("Metric", small), para("Value", small)],
+        [para("Header Risk Score"), para(email.header_risk_score)],
+        [para("Phishing Probability"), para(email.phishing_probability)],
+        [para("IP Risk Score"), para(email.ip_risk_score)],
+        [para("URL Risk Score"), para(email.url_risk_score)],
+    ])
+
+    story.append(Paragraph("5. IP Intelligence", section))
+    add_table([
+        [para("Field", small), para("Value", small)],
+        [para("Primary IP"), para(res.get("primary_ip", ""))],
+        [para("Geolocation"), para(res.get("geo", {}))],
+        [para("Reputation"), para(res.get("reputation", {}))],
+    ])
+
+    story.append(Paragraph("6. Key Findings", section))
+    reasons = res.get("reasons", []) or []
+    if reasons:
+        for reason in reasons:
+            story.append(Paragraph("• " + val(reason), body))
+    else:
+        story.append(para("No specific elevated threat findings were recorded."))
+
+    story.append(Paragraph("7. Flagged Terms", section))
+    flagged = res.get("flagged_terms", []) or []
+    story.append(para(", ".join(map(str, flagged)) if flagged else "None"))
+
+    story.append(Paragraph("8. URL Analysis", section))
+    urls = res.get("urls", []) or []
+    if urls:
+        rows = [[para("URL", small), para("Classification / Risk", small)]]
+        for item in urls[:50]:
+            if isinstance(item, dict):
+                url = item.get("original_url") or item.get("url") or ""
+                details = str(item.get("classification", "N/A"))
+                if item.get("risk_score") is not None:
+                    details += f" | Risk: {item.get('risk_score')}"
+                rows.append([para(url, small), para(details, small)])
+            else:
+                rows.append([para(item, small), para("N/A", small)])
+        add_table(rows, widths=(105 * mm, 75 * mm))
+    else:
+        story.append(para("No URLs detected."))
+
+    story.append(Paragraph("9. Email Body", section))
+    story.append(para((email.body or "")[:12000], small))
+
+    doc.build(story)
+    pdf_bytes = buffer.getvalue()
+    buffer.close()
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
         headers={
-            "Content-Disposition": f'attachment; filename="threat_report_{item_id}.json"'
+            "Content-Disposition": f'attachment; filename="threat_report_{item_id}.pdf"'
         },
     )
 
