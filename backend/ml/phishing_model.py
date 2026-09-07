@@ -42,7 +42,7 @@ INTENT_PATTERNS = [
     (r'\b(?:deadline|expires?|expiring)\b.*\b(?:today|tonight|tomorrow|hours?|minutes?)\b', 30, "artificial deadline pressure"),
     (r'\b(?:today|tonight|tomorrow)\b.*\b(?:deadline|expires?|close[sd]?|end)\b', 30, "artificial deadline pressure"),
     (r'\bbefore\s+(?:the\s+)?(?:deadline|end\s+of\s+(?:day|business)|close\s+of\s+business|eod|eob)\b', 25, "end-of-day pressure"),
-(r'\b(?:within|next)\s+\d+\s*(?:hours?|minutes?|hrs?|mins?)\b', 25, "tight time constraint"),
+    (r'\b(?:within|next)\s+\d+\s*(?:hour|minute|hr|min)', 25, "tight time constraint"),
     (r'\b(?:window|period)\s+closes?\b', 20, "closing window pressure"),
     (r'\bremain(?:s)?\s+(?:temporarily\s+)?restricted\b', 25, "restriction threat"),
 
@@ -145,12 +145,9 @@ HEURISTIC_WEIGHTS = {
     # Modern Threats (Extortion, Gift Cards, Payroll)
     "recorded you": 50,
     "webcam": 40,
-    "bitcoin": 45,
     "pay in bitcoin": 50,
-    "gift card": 45,
     "apple gift card": 50,
     "steam gift card": 50,
-    "direct deposit": 35,
     "payroll update": 40,
     "w2 form": 40,
     "urgent wire transfer": 50,
@@ -170,7 +167,7 @@ if not os.path.exists(VECTORIZER_PATH):
         VECTORIZER_PATH = alt_v
 
 
-# Built-in robust training corpus (50+ diverse examples)
+# Built-in robust training corpus
 TRAINING_CORPUS = [
     # ── Phishing Examples (obvious) ──
     ("URGENT: Your account has been suspended due to unusual activity. Click here immediately to verify your account and confirm your password.", 1),
@@ -295,16 +292,16 @@ def analyze_intent_patterns(body_text: str) -> dict:
       - matched_intents: list of human-readable intent labels
       - intent_count: number of distinct intent patterns matched
     """
-text = body_text or ""
-matched = []
-total_score = 0
+    body_lower = body_text.lower()
+    matched = []
+    total_score = 0
 
-seen_labels = set()
-for pattern, weight, label in INTENT_PATTERNS:
-    if re.search(pattern, text, flags=re.IGNORECASE) and label not in seen_labels:
-        matched.append(label)
-        total_score += weight
-        seen_labels.add(label)
+    seen_labels = set()
+    for pattern, weight, label in INTENT_PATTERNS:
+        if re.search(pattern, body_lower) and label not in seen_labels:
+            matched.append(label)
+            total_score += weight
+            seen_labels.add(label)
 
     # Co-occurrence amplifier: multiple intent signals compound suspicion
     if len(matched) >= 4:
@@ -339,15 +336,10 @@ def classify_heuristic(body_text: str) -> dict:
 
     # Keyword score
     keyword_score = sum(HEURISTIC_WEIGHTS.get(term, 10) for term in flagged)
-    if len(flagged) >= 3:
-        keyword_score = int(keyword_score * 1.25)
-    raw_score = sum(HEURISTIC_WEIGHTS.get(term, 10) for term in flagged)
-
-    # Multi-term co-occurrence multiplier
     if len(flagged) >= 4:
-        raw_score = int(raw_score * 1.4)
+        keyword_score = int(keyword_score * 1.4)
     elif len(flagged) >= 3:
-        raw_score = int(raw_score * 1.25)
+        keyword_score = int(keyword_score * 1.25)
     elif len(flagged) >= 2:
         keyword_score = int(keyword_score * 1.1)
 
@@ -365,8 +357,7 @@ def classify_heuristic(body_text: str) -> dict:
     if raw_score <= 0:
         phishing_prob = 2
     else:
-        # A more aggressive curve so strong signals break 85+ easily
-        phishing_prob = int(min(98, max(5, 100 / (1 + math.exp(-0.08 * (raw_score - 35))))))
+        phishing_prob = int(min(98, max(5, 100 / (1 + math.exp(-0.04 * (raw_score - 50))))))
 
     legit_prob = max(1, 100 - phishing_prob)
 
@@ -381,7 +372,7 @@ def classify_heuristic(body_text: str) -> dict:
 def classify(body_text: str) -> dict:
     """
     Classifies email body text for phishing probability.
-    Pipeline: DistilBERT → TF-IDF ML → Intent+Keyword Heuristic.
+    Pipeline: DistilBERT -> TF-IDF ML -> Intent+Keyword Heuristic.
     Intent analysis is always blended into final results.
     """
     if not body_text or not body_text.strip():
@@ -502,4 +493,3 @@ if __name__ == "__main__":
         print(f"  Phishing: {result['phishing_probability']}%  |  Method: {result['method']}")
         print(f"  Flagged: {', '.join(result['flagged_terms'][:5])}")
     print()
-
